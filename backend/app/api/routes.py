@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import time
 import uuid
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from ..knowledge.catalog import Catalog, normalize_code
 from ..knowledge.keywords import extract_keywords
 from ..knowledge.loader import KnowledgeBase
 from ..knowledge.retriever import Retriever, tokenize
+from ..eval.store import EvalStore
 from ..memory.store import MemoryStore
 
 router = APIRouter(prefix="/api")
@@ -22,6 +24,7 @@ retriever = Retriever(knowledge_base)
 planner = Planner(retriever)
 memory_store = MemoryStore(MEMORY_DIR)
 catalog = Catalog()
+eval_store = EvalStore()
 
 
 @router.get("/health")
@@ -163,6 +166,8 @@ def conversation_messages(conversation_id: str) -> list[schemas.MessageRecord]:
 
 @router.post("/chat", response_model=schemas.ChatResponse)
 def chat(payload: schemas.ChatRequest) -> schemas.ChatResponse:
+    started = time.perf_counter()
+    trace_id = payload.trace_id or uuid.uuid4().hex[:12]
     conversation_id = payload.conversation_id
     if conversation_id and not memory_store.exists(conversation_id):
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -179,6 +184,7 @@ def chat(payload: schemas.ChatRequest) -> schemas.ChatResponse:
     result = planner.run(
         payload.message,
         previous_query=previous_query,
+        enable_web_search=not payload.disable_web_search,
     )
     exclude_codes = {normalize_code(doc.get("standard", "")) for doc in knowledge_base.documents}
     keywords = extract_keywords(result.get("effective_query") or payload.message, result.get("requested_region"))
@@ -196,10 +202,12 @@ def chat(payload: schemas.ChatRequest) -> schemas.ChatResponse:
         "keywords": keywords,
         "web_results": result["web_results"],
         "web_note": result["web_note"],
+        "trace_id": trace_id,
     }
     memory_store.add_message(conversation_id, "assistant", result["reply"], metadata=metadata)
 
-    return schemas.ChatResponse(
+    response = schemas.ChatResponse(
+        trace_id=trace_id,
         conversation_id=conversation_id,
         reply=result["reply"],
         sources=result["sources"],
@@ -222,3 +230,24 @@ def chat(payload: schemas.ChatRequest) -> schemas.ChatResponse:
             "top_k": RETRIEVAL_TOP_K,
         },
     )
+    latency_ms = (time.perf_counter() - started) * 1000
+    eval_store.save_trace(
+        trace_id,
+        {"message": payload.message, "conversation_id": conversation_id},
+        response.model_dump(),
+        latency_ms,
+    )
+    return response
+
+
+@router.post("/feedback/bad-case")
+def feedback_bad_case(payload: schemas.FeedbackRequest) -> dict[str, str]:
+    bad_case_id = eval_store.add_bad_case(
+        question=payload.question,
+        actual_reply=payload.actual_reply,
+        failed_dimensions=["user_feedback"],
+        source="user_feedback",
+        trace_id=payload.trace_id,
+        user_note=payload.user_note,
+    )
+    return {"bad_case_id": bad_case_id}

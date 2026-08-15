@@ -12,6 +12,7 @@ defineProps({
 defineEmits(['follow-up', 'view-source'])
 
 const expanded = ref(false)
+const feedbackSent = ref(false)
 </script>
 
 <template>
@@ -117,6 +118,15 @@ const expanded = ref(false)
         <Database :size="13" />
         <span>记忆上下文 {{ message.memory.token_estimate }}/{{ message.memory.budget }} tokens · {{ message.memory.recent_messages }} 条近期消息</span>
       </div>
+      <button
+        v-if="message.role === 'assistant'"
+        class="feedback-button"
+        type="button"
+        :disabled="feedbackSent"
+        @click="feedbackSent = true; $emit('feedback', { trace_id: message.trace_id, actual_reply: message.content })"
+      >
+        {{ feedbackSent ? '已反馈' : '标记不准确' }}
+      </button>
     </div>
   </article>
 </template>

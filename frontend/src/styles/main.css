@@ -896,6 +896,27 @@ button {
   font-size: 11px;
 }
 
+.feedback-button {
+  margin-top: 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.feedback-button:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.feedback-button:disabled {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .composer-wrap {
   padding: 12px 20px 16px;
   background: var(--surface);

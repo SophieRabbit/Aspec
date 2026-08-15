@@ -28,4 +28,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  feedbackBadCase: (payload) =>
+    request('/api/feedback/bad-case', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 }

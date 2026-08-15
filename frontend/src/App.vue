@@ -109,6 +109,16 @@ function openDocument(source) {
   }
 }
 
+async function reportBadCase(payload) {
+  const lastUserMessage = [...messages.value].reverse().find((item) => item.role === 'user')
+  await api.feedbackBadCase({
+    trace_id: payload.trace_id,
+    question: lastUserMessage?.content || '',
+    actual_reply: payload.actual_reply,
+    user_note: payload.user_note || '',
+  })
+}
+
 onMounted(async () => {
   try {
     await Promise.all([loadConversations(), loadKnowledge()])
@@ -149,6 +159,7 @@ onMounted(async () => {
         @send="send"
         @follow-up="followUp"
         @view-source="openDocument"
+        @feedback="reportBadCase"
       />
     </section>
     <DocumentModal

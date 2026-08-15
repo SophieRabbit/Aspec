@@ -8,6 +8,15 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     conversation_id: str | None = None
     message: str = Field(min_length=1, max_length=4000)
+    trace_id: str | None = None
+    disable_web_search: bool = False
+
+
+class FeedbackRequest(BaseModel):
+    trace_id: str = ""
+    question: str = Field(min_length=1, max_length=2000)
+    actual_reply: str = ""
+    user_note: str = ""
 
 
 class Source(BaseModel):
@@ -48,6 +57,7 @@ class MemoryInfo(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    trace_id: str = ""
     conversation_id: str
     reply: str
     sources: list[Source] = []
@@ -71,6 +81,7 @@ class ConversationSummary(BaseModel):
 
 
 class MessageRecord(BaseModel):
+    trace_id: str = ""
     role: str
     content: str
     created_at: datetime

@@ -9,7 +9,7 @@ defineProps({
   error: { type: String, default: '' },
 })
 
-defineEmits(['send', 'follow-up', 'view-source'])
+defineEmits(['send', 'follow-up', 'view-source', 'feedback'])
 
 const suggestions = [
   '住宅楼梯踏步宽度和高度有什么要求？',
@@ -44,6 +44,7 @@ const suggestions = [
         :message="message"
         @follow-up="$emit('follow-up', $event)"
         @view-source="$emit('view-source', $event)"
+        @feedback="$emit('feedback', $event)"
       />
       <div v-if="loading" class="thinking-bubble">
         <span class="thinking-dot"></span>

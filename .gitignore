@@ -7,4 +7,6 @@ dist/
 .vscode/
 backend/data/memory/
 backend/data/standards/
+backend/data/eval/
+backend/data/pdfs/
 *.log

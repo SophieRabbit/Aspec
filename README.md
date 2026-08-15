@@ -50,6 +50,24 @@ python scripts/import_pdfs.py --pdf-dir D:\规范资料 --delete-after
 线上部署时，建议把 `standards/` 放到云服务器磁盘或对象存储挂载目录；
 PDF 原文如果要在网页中展示或下载，可存到 OSS/S3 并在索引里记录地址。
 
+## 评测 Harness
+
+- `POST /eval/run`：基于 `backend/tests/datasets/qa_test_suite.jsonl` 批量评测
+- `GET /eval/runs`：历史评测列表
+- `GET /eval/runs/{run_id}/report.html`：HTML 评测报告
+- `GET /eval/bad-cases`：Bad Case 列表
+- `POST /api/feedback/bad-case`：用户反馈入口，前端“标记不准确”会写入同一 Bad Case 池
+
+评测维度：检索命中率、关键词覆盖、出处准确率、回答完整度（LLM-as-Judge 或启发式兜底）、延迟 P50/P95。
+每次评测会与上一次结果对比，指标下降超过 5% 会在报告中标记回归。
+
+CI 门槛脚本：
+
+```bash
+cd backend
+python scripts/eval_gate.py
+```
+
 ## 启动后端
 
 ```bash
