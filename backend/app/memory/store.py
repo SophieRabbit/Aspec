@@ -1,17 +1,25 @@
 from __future__ import annotations
 
-import json
-import re
-import uuid
-from datetime import datetime, timezone
+import logging
 from pathlib import Path
 from typing import Any
 
-from ..config import MEMORY_TOKEN_BUDGET, SHORT_TERM_KEEP
+from ..config import (
+    MEMORY_CONTEXT_FACTS,
+    MEMORY_DATABASE_URL,
+    MEMORY_DIR,
+    MEMORY_IMPORT_JSON,
+    MEMORY_MAX_ITEMS_PER_USER,
+    MEMORY_TOKEN_BUDGET,
+    REDIS_URL,
+    SESSION_KEEP,
+    SESSION_TTL_SECONDS,
+)
+from .distiller import MemoryDistiller
+from .session_store import create_session_store
+from .sql_store import SqlMemoryStore
 
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+logger = logging.getLogger(__name__)
 
 
 def _estimate_tokens(text: str) -> int:
@@ -21,160 +29,115 @@ def _estimate_tokens(text: str) -> int:
 
 
 class MemoryStore:
-    """Stores short-term conversation history and extracted long-term facts."""
+    """
+    Production memory facade.
 
-    def __init__(self, directory: Path) -> None:
-        self.directory = directory
-        self.directory.mkdir(parents=True, exist_ok=True)
+    SQL is the source of truth for raw chat records and structured memory.
+    Redis holds only the current-session hot window, and LLM distillation runs
+    as a background job so it never blocks the chat response.
+    """
 
-    def _path(self, conversation_id: str) -> Path:
-        safe_id = re.sub(r"[^0-9a-zA-Z_-]", "", conversation_id)
-        return self.directory / f"{safe_id}.json"
+    def __init__(
+        self,
+        database_url: str = MEMORY_DATABASE_URL,
+        *,
+        redis_url: str = REDIS_URL,
+        session_ttl_seconds: int = SESSION_TTL_SECONDS,
+        session_keep: int = SESSION_KEEP,
+        import_json: bool = MEMORY_IMPORT_JSON,
+        json_dir: Path = MEMORY_DIR,
+        distiller: MemoryDistiller | None = None,
+    ) -> None:
+        self.sql = SqlMemoryStore(database_url)
+        self.session = create_session_store(redis_url, session_ttl_seconds, session_keep)
+        self.distiller = distiller or MemoryDistiller()
+        if import_json:
+            self.sql.import_json_files(json_dir)
 
-    def _load(self, conversation_id: str) -> dict[str, Any]:
-        path = self._path(conversation_id)
-        if not path.exists():
-            return {
-                "conversation_id": conversation_id,
-                "title": "新对话",
-                "created_at": _now(),
-                "updated_at": _now(),
-                "message_count": 0,
-                "messages": [],
-                "facts": [],
-            }
-        with path.open(encoding="utf-8") as handle:
-            return json.load(handle)
-
-    def _save(self, conversation: dict[str, Any]) -> None:
-        conversation["updated_at"] = _now()
-        with self._path(conversation["conversation_id"]).open("w", encoding="utf-8") as handle:
-            json.dump(conversation, handle, ensure_ascii=False, indent=2)
-
-    def exists(self, conversation_id: str) -> bool:
-        return self._path(conversation_id).exists()
-
-    def create_conversation(self, title: str = "新对话") -> dict[str, Any]:
-        conversation_id = uuid.uuid4().hex[:12]
-        conversation = {
-            "conversation_id": conversation_id,
-            "title": title,
-            "created_at": _now(),
-            "updated_at": _now(),
-            "message_count": 0,
-            "messages": [],
-            "facts": [],
-        }
-        self._save(conversation)
+    def create_conversation(self, user_id: str = "default", title: str = "新对话") -> dict[str, Any]:
+        conversation = self.sql.create_conversation(user_id=user_id, title=title)
+        self.session.set_recent_messages(conversation["conversation_id"], user_id, [])
         return conversation
 
-    def delete_conversation(self, conversation_id: str) -> bool:
-        path = self._path(conversation_id)
-        if path.exists():
-            path.unlink()
-            return True
-        return False
+    def exists(self, conversation_id: str, user_id: str = "default") -> bool:
+        return self.sql.exists(conversation_id, user_id)
 
-    def list_conversations(self) -> list[dict[str, Any]]:
-        conversations: list[dict[str, Any]] = []
-        for path in self.directory.glob("*.json"):
-            with path.open(encoding="utf-8") as handle:
-                conversations.append(json.load(handle))
-        conversations.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
-        return conversations
+    def list_conversations(self, user_id: str = "default") -> list[dict[str, Any]]:
+        return self.sql.list_conversations(user_id)
 
-    def get_messages(self, conversation_id: str) -> list[dict[str, Any]]:
-        return self._load(conversation_id).get("messages", [])
+    def delete_conversation(self, conversation_id: str, user_id: str = "default") -> bool:
+        deleted = self.sql.delete_conversation(conversation_id, user_id)
+        self.session.delete(conversation_id, user_id)
+        return deleted
+
+    def get_messages(self, conversation_id: str, user_id: str = "default") -> list[dict[str, Any]]:
+        return self.sql.get_messages(conversation_id, user_id)
 
     def add_message(
         self,
         conversation_id: str,
         role: str,
         content: str,
+        *,
+        user_id: str = "default",
         metadata: dict[str, Any] | None = None,
-    ) -> None:
-        conversation = self._load(conversation_id)
-        conversation["message_count"] += 1
-        if role == "user" and conversation["title"] == "新对话":
-            conversation["title"] = content.strip()[:24]
-        message = {
-            "role": role,
-            "content": content[:2000],
-            "created_at": _now(),
-        }
-        if metadata:
-            message.update(metadata)
-        conversation["messages"].append(message)
-        if role == "user":
-            facts = self._extract_facts(content)
-            for fact in facts:
-                self._upsert_fact(conversation, fact)
-        self._save(conversation)
-
-    @staticmethod
-    def _extract_facts(text: str) -> list[dict[str, Any]]:
-        patterns = [
-            r"(项目(?:名称|类型|地点|地区|位置|性质|用途|规模))[:：\s]*([^，。；\n]{1,40})",
-            r"(建筑面积|套内面积|建筑高度|总高度|层高|层数|耐火等级|建筑类别|防火分区面积)[:：]?\s*([^，。；\n]{1,40})",
-            r"((?:本项目|这个项目|该建筑|住宅|办公楼|医院|学校|厂房|商业建筑)[^，。；\n]{0,34})",
-        ]
-        facts: list[dict[str, Any]] = []
-        for pattern in patterns:
-            for match in re.finditer(pattern, text):
-                label = match.group(1)
-                value = match.group(2) if match.lastindex and match.lastindex >= 2 else label
-                fact_text = f"{label}：{value}" if value != label else label
-                if len(fact_text) < 6:
-                    continue
-                facts.append(
-                    {
-                        "text": fact_text,
-                        "category": "项目信息",
-                        "importance": 2,
-                    }
-                )
-        return facts
-
-    @staticmethod
-    def _upsert_fact(conversation: dict[str, Any], new_fact: dict[str, Any]) -> None:
-        normalized = re.sub(r"\s+", "", new_fact["text"])
-        for fact in conversation["facts"]:
-            if re.sub(r"\s+", "", fact["text"]) == normalized:
-                fact["occurrences"] += 1
-                fact["importance"] = min(5, fact.get("importance", 2) + 1)
-                fact["last_seen_at"] = _now()
-                return
-        conversation["facts"].append(
-            {
-                "text": new_fact["text"],
-                "category": new_fact["category"],
-                "importance": new_fact["importance"],
-                "occurrences": 1,
-                "created_at": _now(),
-                "last_seen_at": _now(),
-            }
+        trace_id: str = "",
+    ) -> dict[str, Any]:
+        message = self.sql.add_message(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            role=role,
+            content=content,
+            metadata=metadata,
+            trace_id=trace_id,
         )
+        self.session.push_message(
+            conversation_id,
+            user_id,
+            {
+                "role": role,
+                "content": content[:300],
+                "created_at": message["created_at"],
+                "trace_id": trace_id,
+            },
+        )
+        return message
 
-    def build_context(self, conversation_id: str, max_tokens: int = MEMORY_TOKEN_BUDGET) -> dict[str, Any]:
-        conversation = self._load(conversation_id)
-        facts = conversation.get("facts", [])
-        ranked_facts = sorted(
-            facts,
-            key=lambda item: item.get("importance", 1) * (1 + min(5, item.get("occurrences", 1))),
-            reverse=True,
-        )[:8]
+    def get_recent_messages(
+        self,
+        conversation_id: str,
+        user_id: str = "default",
+        limit: int = SESSION_KEEP,
+    ) -> list[dict[str, Any]]:
+        cached = self.session.get_recent_messages(conversation_id, user_id)
+        if cached is not None:
+            return cached[-limit:] if limit else cached
+        messages = self.sql.get_messages(conversation_id, user_id)
+        recent = messages[-limit:] if limit else messages
+        self.session.set_recent_messages(conversation_id, user_id, recent)
+        return recent
+
+    def build_context(
+        self,
+        conversation_id: str,
+        *,
+        user_id: str = "default",
+        max_tokens: int = MEMORY_TOKEN_BUDGET,
+        max_facts: int = MEMORY_CONTEXT_FACTS,
+        recent_limit: int = SESSION_KEEP,
+    ) -> dict[str, Any]:
+        facts = self.sql.list_memory_items(user_id, limit=max_facts)
+        recent = self.get_recent_messages(conversation_id, user_id, limit=recent_limit)
 
         lines: list[str] = []
-        if ranked_facts:
+        if facts:
             lines.append("长期记忆：")
-            lines.extend(f"- {fact['text']}" for fact in ranked_facts)
-
-        recent = conversation.get("messages", [])[-SHORT_TERM_KEEP:]
+            lines.extend(f"- {fact['text']}" for fact in facts)
         if recent:
             lines.append("近期对话：")
             for message in recent:
                 role = "用户" if message["role"] == "user" else "助手"
-                content = message["content"][:300]
+                content = str(message.get("content", ""))[:300]
                 lines.append(f"{role}：{content}")
 
         context_text = "\n".join(lines)
@@ -183,9 +146,132 @@ class MemoryStore:
             context_text = "\n".join(lines)
         return {
             "context": context_text,
-            "facts": ranked_facts,
+            "facts": facts,
             "recent_messages": len(recent),
             "token_estimate": _estimate_tokens(context_text),
             "budget": max_tokens,
-            "strategy": "长期记忆抽取 + 近期对话窗口 + Token 预算裁剪",
+            "strategy": "Redis 会话缓存 + SQL 原始记录 + LLM 结构化记忆库",
         }
+
+    def list_facts(self, user_id: str = "default", limit: int = 200) -> list[dict[str, Any]]:
+        return self.sql.list_memory_items(user_id, limit=limit)
+
+    def forget_fact(self, item_id: str, user_id: str = "default") -> bool:
+        return self.sql.delete_memory_item(item_id, user_id)
+
+    def distill(
+        self,
+        *,
+        conversation_id: str,
+        user_id: str,
+        user_message_id: str | None,
+        user_content: str,
+        assistant_content: str,
+    ) -> None:
+        if not user_content.strip():
+            return
+        job_id = self.sql.create_distill_job(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            source_message_id=user_message_id,
+        )
+        self._process_distill_job(
+            job_id=job_id,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            user_message_id=user_message_id,
+            user_content=user_content,
+            assistant_content=assistant_content,
+        )
+
+    def _process_distill_job(
+        self,
+        *,
+        job_id: str,
+        conversation_id: str,
+        user_id: str,
+        user_message_id: str | None,
+        user_content: str,
+        assistant_content: str,
+    ) -> None:
+        job = self.sql.get_distill_job(job_id)
+        attempts = int(job.get("attempts", 0)) if job else 0
+        last_error: Exception | None = None
+        while attempts < 2:
+            attempts += 1
+            try:
+                facts = self.distiller.extract(user_content, assistant_content)
+                for fact in facts:
+                    self.sql.upsert_memory_item(
+                        user_id=user_id,
+                        source_conversation_id=conversation_id,
+                        source_message_id=user_message_id,
+                        text=fact["text"],
+                        category=fact["category"],
+                        importance=fact["importance"],
+                    )
+                self.sql.trim_memory_items(user_id, MEMORY_MAX_ITEMS_PER_USER)
+                self.sql.mark_distill_job(
+                    job_id,
+                    status="done",
+                    result=facts,
+                    attempts=attempts,
+                )
+                return
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "memory distillation attempt %s failed for job %s: %s",
+                    attempts,
+                    job_id,
+                    exc,
+                )
+        self.sql.mark_distill_job(
+            job_id,
+            status="failed",
+            error=str(last_error),
+            attempts=attempts,
+        )
+
+    def retry_distill_jobs(self, limit: int = 20) -> int:
+        retried = 0
+        for job in self.sql.list_distill_jobs_for_retry(limit):
+            user_message = (
+                self.sql.get_message(job["source_message_id"], job["user_id"])
+                if job.get("source_message_id")
+                else None
+            )
+            if not user_message:
+                self.sql.mark_distill_job(
+                    job["id"],
+                    status="failed",
+                    error="source message not found",
+                    attempts=job["attempts"],
+                )
+                continue
+            messages = self.sql.get_messages(job["conversation_id"], job["user_id"])
+            assistant_content = ""
+            found_user = False
+            for message in messages:
+                if str(message.get("id")) == job.get("source_message_id"):
+                    found_user = True
+                    continue
+                if found_user and message.get("role") == "assistant":
+                    assistant_content = message.get("content", "")
+                    break
+            self._process_distill_job(
+                job_id=job["id"],
+                conversation_id=job["conversation_id"],
+                user_id=job["user_id"],
+                user_message_id=job["source_message_id"],
+                user_content=user_message["content"],
+                assistant_content=assistant_content,
+            )
+            retried += 1
+        return retried
+
+    def list_distill_jobs(self, user_id: str = "default", limit: int = 50) -> list[dict[str, Any]]:
+        return self.sql.list_distill_jobs(user_id, limit=limit)
+
+    def close(self) -> None:
+        self.sql.close()

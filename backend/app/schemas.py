@@ -10,13 +10,7 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     trace_id: str | None = None
     disable_web_search: bool = False
-
-
-class FeedbackRequest(BaseModel):
-    trace_id: str = ""
-    question: str = Field(min_length=1, max_length=2000)
-    actual_reply: str = ""
-    user_note: str = ""
+    user_id: str | None = None
 
 
 class Source(BaseModel):
@@ -28,8 +22,11 @@ class Source(BaseModel):
     chapter: str
     article: str
     page: int | None = None
+    book_page: int | None = None
     snippet: str
     score: float
+    priority: int = 0
+    tier: str = ""
 
 
 class ReasoningStep(BaseModel):
@@ -69,6 +66,11 @@ class ChatResponse(BaseModel):
     keywords: list[KeywordItem] = []
     web_results: list[WebResult] = []
     web_note: str = ""
+    intent: str = ""
+    intent_label: str = ""
+    intent_source: str = ""
+    intent_confidence: float = 0.0
+    intent_alias: str = ""
     usage: dict = {}
 
 
@@ -78,6 +80,7 @@ class ConversationSummary(BaseModel):
     created_at: datetime
     updated_at: datetime
     message_count: int
+    user_id: str = "default"
 
 
 class MessageRecord(BaseModel):
@@ -93,6 +96,11 @@ class MessageRecord(BaseModel):
     keywords: list[KeywordItem] = []
     web_results: list[WebResult] = []
     web_note: str = ""
+    intent: str = ""
+    intent_label: str = ""
+    intent_source: str = ""
+    intent_confidence: float = 0.0
+    intent_alias: str = ""
 
 
 class KnowledgeStatus(BaseModel):
@@ -106,6 +114,7 @@ class DocumentMatch(BaseModel):
     chapter: str
     article: str
     page: int | None = None
+    book_page: int | None = None
     text: str
     score: float = 0.0
 
@@ -120,6 +129,45 @@ class DocumentContext(BaseModel):
     query_terms: list[str] = []
     total_snippets: int
     matches: list[DocumentMatch] = []
+
+
+class SearchItem(BaseModel):
+    doc_id: str
+    standard: str
+    title: str
+    status: str
+    effective_date: str = ""
+    region: str = ""
+    level: str = ""
+    priority: int = 0
+    tier: str = ""
+
+
+class SearchResponse(BaseModel):
+    query: str
+    items: list[SearchItem] = []
+
+
+class SpecSnippet(BaseModel):
+    chapter: str = ""
+    article: str = ""
+    page: int | None = None
+    book_page: int | None = None
+    text: str = ""
+
+
+class SpecDetailResponse(BaseModel):
+    doc_id: str
+    standard: str
+    title: str
+    document_type: str
+    region: str
+    status: str
+    effective_date: str = ""
+    priority: int = 0
+    tier: str = ""
+    matched: bool = True
+    snippets: list[SpecSnippet] = []
 
 
 class RecommendationItem(BaseModel):

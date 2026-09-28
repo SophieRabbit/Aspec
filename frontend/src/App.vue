@@ -14,6 +14,7 @@ const loading = ref(false)
 const sidebarOpen = ref(false)
 const errorMessage = ref('')
 const activeDocument = ref(null)
+const chatPanelRef = ref(null)
 
 const activeConversation = computed(() =>
   conversations.value.find((item) => item.conversation_id === activeId.value),
@@ -29,8 +30,30 @@ async function loadKnowledge() {
 
 async function selectConversation(id) {
   activeId.value = id
-  messages.value = await api.messages(id)
+  messages.value = await restoreHistorySearch(id)
   sidebarOpen.value = false
+}
+
+async function restoreHistorySearch(id) {
+  const records = await api.messages(id)
+  const restored = []
+  let lastUserContent = ''
+  for (const record of records) {
+    const item = { ...record }
+    if (item.role === 'user') {
+      lastUserContent = item.content || ''
+    }
+    if (item.role === 'assistant' && lastUserContent) {
+      try {
+        const searchResult = await api.search(lastUserContent)
+        item.search_items = searchResult.items || []
+      } catch {
+        item.search_items = item.search_items || []
+      }
+    }
+    restored.push(item)
+  }
+  return restored
 }
 
 async function newConversation() {
@@ -75,6 +98,19 @@ async function send(text) {
       conversation_id: conversationId,
       message: content,
     })
+    let searchItems = []
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const searchResult = await api.search(content)
+        searchItems = searchResult.items || []
+        if (searchItems.length) break
+      } catch {
+        searchItems = []
+      }
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 400))
+      }
+    }
     messages.value.push({
       role: 'assistant',
       content: result.reply,
@@ -87,6 +123,12 @@ async function send(text) {
       web_results: result.web_results,
       web_note: result.web_note,
       memory: result.memory,
+      intent: result.intent,
+      intent_label: result.intent_label,
+      intent_source: result.intent_source,
+      intent_confidence: result.intent_confidence,
+      intent_alias: result.intent_alias,
+      search_items: searchItems,
       created_at: new Date().toISOString(),
     })
     await loadConversations()
@@ -101,25 +143,28 @@ function followUp(text) {
   send(text)
 }
 
-function openDocument(source) {
+function goHome() {
+  sidebarOpen.value = false
+  activeDocument.value = null
+  chatPanelRef.value?.scrollToTop()
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function openDocument(detail) {
   const lastUserMessage = [...messages.value].reverse().find((item) => item.role === 'user')
   activeDocument.value = {
-    source,
+    doc_id: detail.doc_id,
     query: lastUserMessage?.content || '',
+    article: detail.article || '',
+    page: detail.book_page || detail.page || null,
   }
 }
 
-async function reportBadCase(payload) {
-  const lastUserMessage = [...messages.value].reverse().find((item) => item.role === 'user')
-  await api.feedbackBadCase({
-    trace_id: payload.trace_id,
-    question: lastUserMessage?.content || '',
-    actual_reply: payload.actual_reply,
-    user_note: payload.user_note || '',
-  })
-}
-
 onMounted(async () => {
+  if ('scrollRestoration' in history) {
+    history.scrollRestoration = 'manual'
+  }
+  window.scrollTo(0, 0)
   try {
     await Promise.all([loadConversations(), loadKnowledge()])
   } catch (error) {
@@ -151,21 +196,25 @@ onMounted(async () => {
         :standard-count="knowledge.standards.length"
         @menu="sidebarOpen = true"
         @new="newConversation"
+        @home="goHome"
       />
       <ChatPanel
+        ref="chatPanelRef"
         :messages="messages"
         :loading="loading"
         :error="errorMessage"
         @send="send"
         @follow-up="followUp"
         @view-source="openDocument"
-        @feedback="reportBadCase"
+        @view-detail="openDocument"
       />
     </section>
     <DocumentModal
       v-if="activeDocument"
-      :source="activeDocument.source"
+      :doc-id="activeDocument.doc_id"
       :query="activeDocument.query"
+      :article="activeDocument.article"
+      :page="activeDocument.page"
       @close="activeDocument = null"
     />
   </div>

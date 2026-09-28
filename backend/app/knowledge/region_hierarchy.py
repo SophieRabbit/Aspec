@@ -32,6 +32,20 @@ KNOWN_HIERARCHY: dict[str, tuple[str | None, str | None, str | None]] = {
     "广东省": ("广东省", None, None),
     "河北省": ("河北省", None, None),
     "浙江省": ("浙江省", None, None),
+    "杭州市": ("浙江省", "杭州市", None),
+    "南京市": ("江苏省", "南京市", None),
+    "深圳市": ("广东省", "深圳市", None),
+    "武汉市": ("湖北省", "武汉市", None),
+    "广州市": ("广东省", "广州市", None),
+    "长沙市": ("湖南省", "长沙市", None),
+    "郑州市": ("河南省", "郑州市", None),
+    "济南市": ("山东省", "济南市", None),
+    "青岛市": ("山东省", "青岛市", None),
+    "合肥市": ("安徽省", "合肥市", None),
+    "福州市": ("福建省", "福州市", None),
+    "沈阳市": ("辽宁省", "沈阳市", None),
+    "大连市": ("辽宁省", "大连市", None),
+    "石家庄市": ("河北省", "石家庄市", None),
     "陕西省": ("陕西省", None, None),
     "海南省": ("海南省", None, None),
     "北京市": ("北京市", None, None),
@@ -95,9 +109,41 @@ REGION_ALIASES = {
 }
 
 ALIASES = {
+    "北京": "北京市",
+    "上海": "上海市",
+    "天津": "天津市",
+    "重庆": "重庆市",
+    "江苏": "江苏省",
+    "浙江": "浙江省",
+    "广东": "广东省",
+    "四川": "四川省",
+    "河北": "河北省",
+    "山西": "山西省",
+    "陕西": "陕西省",
+    "云南": "云南省",
+    "贵州": "贵州省",
+    "新疆": "新疆维吾尔自治区",
+    "深圳": "深圳市",
+    "杭州": "杭州市",
+    "南京": "南京市",
+    "武汉": "武汉市",
+    "广州": "广州市",
+    "长沙": "长沙市",
+    "郑州": "郑州市",
+    "济南": "济南市",
+    "青岛": "青岛市",
+    "合肥": "合肥市",
+    "福州": "福州市",
+    "沈阳": "沈阳市",
+    "大连": "大连市",
+    "石家庄": "石家庄市",
     "昆山": "昆山市",
     "苏州": "苏州市",
     "成都": "成都市",
+    "天府新区": "成都市",
+    "四川天府新区": "成都市",
+    "天府新区直管区": "成都市",
+    "四川天府新区直管区": "成都市",
     "蒲江": "蒲江县",
     "内江": "内江市",
     "广安": "广安市",
@@ -112,6 +158,8 @@ ALIASES = {
     "太原": "太原市",
     "乌鲁木齐": "乌鲁木齐市",
 }
+
+COMPARISON_TERMS = ("对比", "比较", "区别", "差异", "有何不同", "同时查询")
 
 
 def apply_region_hierarchy(document: dict[str, Any]) -> dict[str, Any]:
@@ -146,36 +194,89 @@ def detect_requested_region(query: str, documents: list[dict[str, Any]]) -> dict
     for alias, canonical in resolved_names.items():
         query = query.replace(alias, canonical)
 
-    for name in sorted(candidates, key=len, reverse=True):
-        if len(name) >= 2 and name in query:
-            province, city, district = candidates[name]
-            region = PROVINCE_REGION.get(province or "", "")
-            if not region and name in REGION_ALIASES:
-                region = name
-            if region and not province and not city and not district:
-                scope = "region"
-            else:
-                scope = "district" if district else "city" if city else "province"
-            return {
-                "place": name,
-                "province": province or "",
-                "city": city or "",
-                "district": district or "",
-                "region": region,
-                "scope": scope,
-            }
+    matches: list[tuple[int, int, int, str, str, str, str, str]] = []
+    scope_rank = {"district": 4, "city": 3, "region": 2, "province": 1}
+    for name, hierarchy in candidates.items():
+        start = query.find(name)
+        if len(name) < 2 or start < 0:
+            continue
+        province, city, district = hierarchy
+        region = PROVINCE_REGION.get(province or "", "")
+        if not region and name in REGION_ALIASES:
+            region = name
+        if region and not province and not city and not district:
+            scope = "region"
+        else:
+            scope = "district" if district else "city" if city else "province"
+        matches.append(
+            (
+                -scope_rank.get(scope, 0),
+                start,
+                -len(name),
+                name,
+                province or "",
+                city or "",
+                district or "",
+                region,
+            )
+        )
 
-    match = re.search(r"([\u4e00-\u9fff]{2,12}?(?:省|市|自治州|地区|盟|区|县|旗))", query)
-    if match:
+    if matches:
+        _, _, _, name, province, city, district, region = min(matches)
+        if region and not province and not city and not district:
+            scope = "region"
+        else:
+            scope = "district" if district else "city" if city else "province"
         return {
-            "place": match.group(1),
-            "province": "",
-            "city": "",
-            "district": "",
-            "region": "",
-            "scope": "unknown",
+            "place": name,
+            "province": province,
+            "city": city,
+            "district": district,
+            "region": region,
+            "scope": scope,
         }
+
     return None
+
+
+def extract_regions(text: str, documents: list[dict[str, Any]] | None = None) -> list[str]:
+    """Extract every region/city mentioned in a query, canonicalized."""
+    normalized = text
+    if "背景" in normalized and any(term in text for term in COMPARISON_TERMS):
+        normalized = normalized.replace("背景", "北京")
+
+    candidates = set(KNOWN_HIERARCHY)
+    for document in documents or []:
+        for key in ("district", "city", "province", "region"):
+            value = document.get(key)
+            if value:
+                candidates.add(value)
+
+    for alias, canonical in ALIASES.items():
+        if alias in normalized:
+            normalized = normalized.replace(alias, canonical)
+
+    parts = re.split(
+        r"[\s，。；、,，/]+|和|与|及|还有|以及|对比|比较|同时查询|区别|差异|有何不同",
+        normalized,
+    )
+    known_names = sorted(candidates | set(ALIASES.values()), key=len, reverse=True)
+    regions: list[str] = []
+    for part in parts:
+        part = part.strip("的规范标准要求问题吗？?。")
+        if not part:
+            continue
+        for name in known_names:
+            if part.startswith(name) and name not in regions:
+                regions.append(name)
+                break
+        match = re.match(
+            r"^([\u4e00-\u9fff]{2,12}?(?:省|市|自治区|自治州|地区|盟|区|县|旗))",
+            part,
+        )
+        if match and match.group(1) not in regions:
+            regions.append(match.group(1))
+    return regions
 
 
 def document_in_scope(document: dict[str, Any], requested: dict[str, Any] | None) -> bool:
@@ -290,13 +391,16 @@ def build_region_notice(requested: dict[str, Any] | None, documents: list[dict[s
             f"未找到【{place}】相关规范，本次仅展示国家级规范；"
             f"当前知识库未收录{region}、{province}、{city}、{district}的相关规范。"
         )
-    if requested.get("district") and counts["district"] == 0:
-        return f"未找到【{place}】相关规范，已为你展示：{'、'.join(levels)}。"
-    if requested.get("city") and counts["city"] == 0:
-        return f"未找到【{place}】本级规范，已为你展示：{'、'.join(levels)}。"
-    if requested.get("province") and counts["province"] == 0:
-        return f"未找到【{place}】相关规范，已为你展示：{'、'.join(levels)}。"
-    if requested.get("region") and counts["region"] == 0:
+    if requested.get("district"):
+        if counts["district"] == 0:
+            return f"未找到【{place}】本级规范，已为你展示：{'、'.join(levels)}。"
+    elif requested.get("city"):
+        if counts["city"] == 0:
+            return f"未找到【{place}】本级规范，已为你展示：{'、'.join(levels)}。"
+    elif requested.get("province"):
+        if counts["province"] == 0:
+            return f"未找到【{place}】本级规范，已为你展示：{'、'.join(levels)}。"
+    elif requested.get("region") and counts["region"] == 0:
         return f"未找到【{place}】相关规范，已为你展示：{'、'.join(levels)}。"
     return f"已为你展示【{place}】及上级相关规范：{'、'.join(levels)}。"
 

@@ -1,15 +1,47 @@
 <script setup>
 import { BookOpen, Sparkles } from 'lucide-vue-next'
+import { nextTick, ref, watch } from 'vue'
 import Composer from './Composer.vue'
 import MessageBubble from './MessageBubble.vue'
 
-defineProps({
+const props = defineProps({
   messages: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
 })
 
-defineEmits(['send', 'follow-up', 'view-source', 'feedback'])
+defineEmits(['send', 'follow-up', 'view-source', 'view-detail'])
+
+const listRef = ref(null)
+
+function scrollToBottom() {
+  nextTick(() => {
+    if (listRef.value) {
+      listRef.value.scrollTop = listRef.value.scrollHeight
+    }
+  })
+}
+
+function scrollToTop() {
+  if (listRef.value) {
+    listRef.value.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+}
+
+defineExpose({ scrollToTop })
+
+watch(
+  () => props.messages,
+  () => scrollToBottom(),
+  { deep: false },
+)
+
+watch(
+  () => props.loading,
+  (loading) => {
+    if (!loading) scrollToBottom()
+  },
+)
 
 const suggestions = [
   '住宅楼梯踏步宽度和高度有什么要求？',
@@ -37,14 +69,14 @@ const suggestions = [
         </button>
       </div>
     </div>
-    <div v-else class="message-list">
+    <div v-else ref="listRef" class="message-list">
       <MessageBubble
         v-for="(message, index) in messages"
         :key="index"
         :message="message"
         @follow-up="$emit('follow-up', $event)"
         @view-source="$emit('view-source', $event)"
-        @feedback="$emit('feedback', $event)"
+        @view-detail="$emit('view-detail', $event)"
       />
       <div v-if="loading" class="thinking-bubble">
         <span class="thinking-dot"></span>

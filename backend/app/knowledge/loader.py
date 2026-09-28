@@ -6,8 +6,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ..config import PDF_CHUNK_CHARS, SAMPLE_KB_PATH, STANDARDS_DIR
+from ..config import PDF_CHUNK_CHARS, STANDARDS_DIR
+from .catalog import normalize_code
+from .priority_engine import apply_priority
 from .region_hierarchy import apply_region_hierarchy
+from .text_cleaner import strip_publication_metadata
 
 
 def _slugify(text: str) -> str:
@@ -35,14 +38,26 @@ class KnowledgeBase:
     def reload(self) -> None:
         STANDARDS_DIR.mkdir(parents=True, exist_ok=True)
         documents: list[dict[str, Any]] = []
-        for path in [SAMPLE_KB_PATH, *sorted(STANDARDS_DIR.glob("*.json"))]:
+        for path in sorted(STANDARDS_DIR.glob("*.json")):
             if not path.exists():
                 continue
             with path.open(encoding="utf-8") as handle:
                 payload = json.load(handle)
             raw_documents = payload if isinstance(payload, list) else payload.get("documents", [])
-            documents.extend(self._normalize_document(item) for item in raw_documents)
-        self.documents = documents
+            for item in raw_documents:
+                documents.append(self._normalize_document(item))
+        unique: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for document in documents:
+            key = (
+                normalize_code(document.get("standard", "")),
+                document.get("title", ""),
+                document.get("region", ""),
+            )
+            if key not in unique or len(document.get("snippets", [])) > len(
+                unique[key].get("snippets", [])
+            ):
+                unique[key] = document
+        self.documents = list(unique.values())
         self.loaded_at = time.time()
 
     @staticmethod
@@ -54,6 +69,17 @@ class KnowledgeBase:
         document.setdefault("status", "现行")
         document.setdefault("chapters", [])
         document.setdefault("snippets", [])
+        cleaned_snippets: list[dict[str, Any]] = []
+        for snippet in document.get("snippets", []):
+            if not isinstance(snippet, dict) or not snippet.get("text"):
+                continue
+            cleaned = strip_publication_metadata(str(snippet["text"]))
+            if not cleaned:
+                continue
+            snippet["text"] = cleaned
+            cleaned_snippets.append(snippet)
+        document["snippets"] = cleaned_snippets
+        apply_priority(document)
         return apply_region_hierarchy(document)
 
     def ingest_pdf(
@@ -65,6 +91,7 @@ class KnowledgeBase:
         document_type: str = "国家标准",
         category: str = "",
         engine: str = "pypdf",
+        reload_after: bool = True,
     ) -> dict[str, Any]:
         """Extract text from a PDF and save it as a JSON knowledge document."""
         if engine == "pymupdf":
@@ -73,8 +100,7 @@ class KnowledgeBase:
             except ImportError as exc:
                 raise RuntimeError("缺少 PyMuPDF，请安装 pymupdf") from exc
             document = fitz.open(str(path))
-            pages = [page.get_text() for page in document]
-            document.close()
+            pages = list(document)
         else:
             try:
                 from pypdf import PdfReader
@@ -83,20 +109,44 @@ class KnowledgeBase:
             reader = PdfReader(str(path))
             pages = [page.extract_text() or "" for page in reader.pages]
 
+        from .page_numbering import (
+            book_page_from_page_image,
+            extract_trailing_book_page,
+            strip_book_page_token,
+        )
+
         snippets: list[dict[str, Any]] = []
-        for page_index, page_text in enumerate(pages, start=1):
-            text = clean_extracted_text(page_text or "")
+        ocr_engine = None
+        for page_index, page_value in enumerate(pages, start=1):
+            if engine == "pymupdf":
+                page = page_value
+                raw_text = page.get_text() or ""
+            else:
+                page = None
+                raw_text = page_value
+            text = clean_extracted_text(raw_text)
             if not text:
                 continue
+            book_page, text = extract_trailing_book_page(text)
+            if book_page is None and page is not None:
+                if ocr_engine is None:
+                    from rapidocr_onnxruntime import RapidOCR
+
+                    ocr_engine = RapidOCR()
+                book_page = book_page_from_page_image(page, ocr_engine)
+                text = strip_book_page_token(text, book_page)
             for chunk in self._chunk_text(text):
                 snippets.append(
                     {
                         "chapter": "原文",
                         "article": "",
                         "page": page_index,
+                        "book_page": book_page,
                         "text": chunk,
                     }
                 )
+        if engine == "pymupdf":
+            document.close()
 
         document = {
             "id": _slugify(f"{region}-{standard or title}"),
@@ -110,12 +160,14 @@ class KnowledgeBase:
             "chapters": ["原文"],
             "snippets": snippets,
         }
+        apply_priority(document)
         output = STANDARDS_DIR / f"{document['id']}.json"
         output.write_text(
             json.dumps({"documents": [document]}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        self.reload()
+        if reload_after:
+            self.reload()
         return document
 
     @staticmethod

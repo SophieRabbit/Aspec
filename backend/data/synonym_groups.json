@@ -1,0 +1,111 @@
+[
+  {
+    "concept_id": "roof_garden",
+    "canonical": "屋顶花园",
+    "synonyms": [
+      "空中花园",
+      "屋顶绿化",
+      "种植屋面",
+      "露台绿化",
+      "阳台绿化",
+      "屋顶花园",
+      "空中庭院",
+      "建筑立体绿化",
+      "生态阳台",
+      "空中共享平台"
+    ],
+    "related_standards": [
+      "JGJ 155-2013",
+      "GB 55030-2022",
+      "GB 50345-2012"
+    ],
+    "related_attributes": [
+      "防水",
+      "排水",
+      "荷载",
+      "种植土",
+      "绿化",
+      "覆土厚度"
+    ]
+  },
+  {
+    "concept_id": "fourth_gen_housing",
+    "canonical": "庭院式住宅",
+    "synonyms": [
+      "四代住宅",
+      "第四代住宅",
+      "垂直绿化住宅",
+      "空中庭院住宅"
+    ],
+    "related_standards": [
+      "GB 55038-2025",
+      "GB 50096-2011",
+      "JGJ 155-2013"
+    ],
+    "related_attributes": [
+      "阳台",
+      "庭院",
+      "屋顶绿化",
+      "空中花园",
+      "绿化率"
+    ]
+  },
+  {
+    "concept_id": "toilet",
+    "canonical": "卫生间",
+    "synonyms": [
+      "厕所",
+      "洗手间",
+      "厕位",
+      "卫生间"
+    ],
+    "related_standards": [
+      "GB 50096-2011",
+      "GB 50763-2012"
+    ],
+    "related_attributes": [
+      "面积",
+      "尺寸",
+      "无障碍"
+    ]
+  },
+  {
+    "concept_id": "evacuation_stair",
+    "canonical": "疏散楼梯",
+    "synonyms": [
+      "楼梯间",
+      "安全出口",
+      "疏散楼梯间",
+      "防烟楼梯间",
+      "封闭楼梯间"
+    ],
+    "related_standards": [
+      "GB 50016-2014",
+      "GB 55037-2022"
+    ],
+    "related_attributes": [
+      "宽度",
+      "高度",
+      "踏步",
+      "平台"
+    ]
+  },
+  {
+    "concept_id": "fire_compartment",
+    "canonical": "防火分区",
+    "synonyms": [
+      "防火分隔",
+      "防火单元",
+      "防火区域"
+    ],
+    "related_standards": [
+      "GB 50016-2014",
+      "GB 55037-2022"
+    ],
+    "related_attributes": [
+      "面积",
+      "分隔",
+      "防火墙"
+    ]
+  }
+]

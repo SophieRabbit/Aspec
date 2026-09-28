@@ -7,7 +7,7 @@ defineProps({
   standardCount: { type: Number, default: 0 },
 })
 
-defineEmits(['menu', 'new'])
+defineEmits(['menu', 'new', 'home'])
 </script>
 
 <template>
@@ -19,6 +19,11 @@ defineEmits(['menu', 'new'])
       <span class="brand-mark"><BookOpen :size="18" /></span>
       <span class="brand-name">规宝</span>
     </div>
+    <nav class="header-nav" aria-label="主导航">
+      <button class="header-nav-link active" type="button" @click="$emit('home')">
+        首页
+      </button>
+    </nav>
     <div class="conversation-title" :title="title">{{ title || '工程规范智能问答' }}</div>
     <div class="header-actions">
       <div class="knowledge-chip" title="知识库状态">

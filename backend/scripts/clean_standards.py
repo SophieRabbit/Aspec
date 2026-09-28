@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import STANDARDS_DIR  # noqa: E402
-from app.knowledge.loader import clean_extracted_text  # noqa: E402
+from app.knowledge.text_cleaner import PREAMBLE_1, PREAMBLE_2, clean_kb_text  # noqa: E402
 
 
 def main() -> int:
@@ -17,9 +17,18 @@ def main() -> int:
         documents = payload if isinstance(payload, list) else payload.get("documents", [])
         changed = False
         for document in documents:
+            raw_title = document.get("title", "")
+            cleaned_title = clean_kb_text(raw_title)
+            if cleaned_title != raw_title:
+                document["title"] = cleaned_title
+                changed = True
             for snippet in document.get("snippets", []):
                 raw = snippet.get("text", "")
-                cleaned_text = clean_extracted_text(raw)
+                cleaned_text = clean_kb_text(raw)
+                if "为适应国际技术法规与技术标准通行规则" in cleaned_text:
+                    cleaned_text = PREAMBLE_1
+                elif "项目建设水平或技术水平的高低程度" in cleaned_text:
+                    cleaned_text = PREAMBLE_2
                 if cleaned_text != raw:
                     snippet["text"] = cleaned_text
                     changed = True

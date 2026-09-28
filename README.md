@@ -6,10 +6,114 @@
 
 - 自然语言提问，从预构建知识库检索规范条文
 - 返回答案、出处（标准/章节/条文/页码）、延伸问题
-- Agent 自主规划：条文检索、数值计算、规范对比
-- 多轮记忆：短期对话窗口 + 长期事实抽取 + Token 预算控制
+- Agent 自主规划：LLM Function Calling 决策条文检索、数值计算、规范对比与联网搜索；未配置 LLM 时自动回退规则 Planner
+- 多轮记忆：Redis 当前会话窗口 + SQL 原始聊天记录 + LLM 结构化记忆库 + Token 预算控制
 - 响应式界面：PC 左侧会话列表 + 右侧聊天，移动端全屏聊天
 - 支持上传 PDF 生成可检索的知识文档
+
+## 记忆系统架构（生产版）
+
+记忆链路分为三层，所有原始记录和结构化记忆都以 SQL 为准，Redis 只承担当前会话热缓存：
+
+1. Redis 当前会话：保存最近 `SESSION_KEEP` 条消息，key 为 `memory:session:{user_id}:{conversation_id}`，带 `SESSION_TTL_SECONDS` 过期时间，用于快速组装近期上下文。
+2. SQL 原始聊天记录：`conversations`、`messages` 两张表保存会话和每一条用户/助手消息，助手消息附带的来源、推理过程、推荐项等作为 JSON 元数据一并入库。
+3. LLM 结构化记忆库：`memory_items` 保存用户级长期记忆（项目地点、建筑类型、规模、偏好、约束条件等），`memory_jobs` 记录提炼任务状态；每次对话结束后在后台异步提炼，失败自动重试一次，LLM 不可用时自动降级为规则抽取。
+
+结构化记忆跨会话共享，因此用户在新会话里提到“防火分区要求”时，系统能自动带上此前记录的“昆山市住宅项目、地上 18 层”等背景。用户维度通过 `X-User-Id` 请求头隔离，正式接入登录后由鉴权中间件注入真实用户 ID 即可。
+
+旧版 `backend/data/memory/*.json` 会在首次启动时自动导入 SQL；不需要可设置 `MEMORY_IMPORT_JSON=0`。
+
+## Function Calling Agent
+
+后端已支持真正的 Function Calling 流程：
+
+```text
+用户提问
+  -> LLM 收到 tools 列表
+  -> LLM 自主决策返回 tool_call
+  -> 后端执行 retrieve_standards / calculate_expression / compare_standards / web_search
+  -> 工具结果回传给 LLM
+  -> LLM 生成最终答案
+```
+
+配置了 `LLM_API_BASE` 和 `LLM_API_KEY` 后默认启用；没有配置、配置错误或 LLM 调用失败时，会自动回退到原规则 Planner，保证本地开发和评测稳定。
+
+```bash
+AGENT_FUNCTION_CALLING_ENABLED=1
+AGENT_MAX_TOOL_TURNS=4
+AGENT_LLM_TIMEOUT_SECONDS=20
+AGENT_TOOL_RESULT_CHARS=12000
+```
+
+每次工具调用都会写入现有 `reasoning` / `steps`，前端推理过程展示不需要改动。
+
+## 多地区 / 多城市对比
+
+支持“对比上海和北京的防水规范”“同时查询杭州和南京的容积率规定”这类问题：
+
+```text
+用户问题
+  -> 提取 regions + topic
+  -> compare_regional_standards(regions, topic)
+  -> 按地区分别检索本地规范
+  -> 分组输出标准、章节、条文、页码
+```
+
+- LLM Function Calling 模式下，模型可直接调用 `compare_regional_standards` 并传入 `regions` 列表。
+- 未配置 LLM 时，规则解析会自动识别多个地区，并走同一套跨地区对比逻辑。
+- 如果某个地区没有收录相关规范，会明确提示“知识库未收录”，不会拿全国规范或其他地区规范顶替。
+
+## Render 部署
+
+仓库根目录已提供 [render.yaml](render.yaml) Blueprint，包含：
+
+- `guibao-api`：FastAPI 后端，PostgreSQL + Redis
+- `guibao-web`：Vue 静态前端，自动把 `/api` 指向后端域名
+- `guibao-memory-worker`：记忆提炼失败任务重试 worker
+
+确认 `render.yaml` 提交并推送到 Git 仓库后，可通过以下链接在 Render 创建 Blueprint：
+
+```text
+https://dashboard.render.com/blueprint/new?repo=https://github.com/SophieRabbit/Aspec.git
+```
+
+需要在 Dashboard 补填 `LLM_API_BASE` 和 `LLM_API_KEY`。
+
+### 生产环境变量
+
+```bash
+# SQL 数据库：生产使用 PostgreSQL，本地不配置时默认 SQLite
+MEMORY_DATABASE_URL=postgresql+psycopg://guibao:change-me@127.0.0.1:5432/guibao
+
+# Redis 当前会话缓存；不配置时自动降级为本地内存（仅适合开发）
+REDIS_URL=redis://127.0.0.1:6379/0
+SESSION_TTL_SECONDS=86400
+SESSION_KEEP=20
+
+# 记忆上下文预算
+MEMORY_TOKEN_BUDGET=1500
+MEMORY_CONTEXT_FACTS=10
+MEMORY_MAX_ITEMS_PER_USER=500
+
+# LLM 结构化记忆提炼
+LLM_API_BASE=https://api.openai.com/v1
+LLM_API_KEY=sk-xxxx
+LLM_MODEL=gpt-4o-mini
+MEMORY_LLM_ENABLED=1
+MEMORY_LLM_TIMEOUT_SECONDS=20
+MEMORY_MAX_FACTS_PER_TURN=12
+```
+
+本地无 Redis、无 LLM Key 时也能直接运行：Redis 降级为进程内会话缓存，提炼降级为规则抽取。真实上线建议同时启用 PostgreSQL、Redis 和 LLM 提炼。
+
+记忆提炼默认在 Web 进程的后台任务中执行；如果要保证多 worker 或进程重启后任务不丢，可以单独部署一个重试 worker：
+
+```bash
+cd backend
+python scripts/memory_worker.py --loop 30
+```
+
+它会扫描 `memory_jobs` 中 `pending` / `failed` 且未超过重试次数的任务，把原会话消息捞回来继续提炼。
 
 ## 导入 PDF 知识库
 
@@ -50,23 +154,51 @@ python scripts/import_pdfs.py --pdf-dir D:\规范资料 --delete-after
 线上部署时，建议把 `standards/` 放到云服务器磁盘或对象存储挂载目录；
 PDF 原文如果要在网页中展示或下载，可存到 OSS/S3 并在索引里记录地址。
 
-## 评测 Harness
+## 优先规范库
 
-- `POST /eval/run`：基于 `backend/tests/datasets/qa_test_suite.jsonl` 批量评测
-- `GET /eval/runs`：历史评测列表
-- `GET /eval/runs/{run_id}/report.html`：HTML 评测报告
-- `GET /eval/bad-cases`：Bad Case 列表
-- `POST /api/feedback/bad-case`：用户反馈入口，前端“标记不准确”会写入同一 Bad Case 池
+`backend/data/priority_standards.json` 收录 38 项 GB55 强制性通用规范，全部为优先级 1 级。检索命中这些规范时，
+得分会额外加上 `PRIORITY_STANDARD_BOOST`（默认 80）；后续加入的其他优先级标准会按级别自动低一档。
 
-评测维度：检索命中率、关键词覆盖、出处准确率、回答完整度（LLM-as-Judge 或启发式兜底）、延迟 P50/P95。
-每次评测会与上一次结果对比，指标下降超过 5% 会在报告中标记回归。
+```bash
+PRIORITY_STANDARD_BOOST=80
+```
 
-CI 门槛脚本：
+查看覆盖情况：
+
+```text
+GET /api/knowledge/priority
+```
+
+把合法 PDF 放入 `backend/data/priority_pdfs/`，然后导入：
 
 ```bash
 cd backend
-python scripts/eval_gate.py
+python scripts/import_priority_pdfs.py --pdf-dir data/priority_pdfs
 ```
+
+脚本会按标准编号/名称自动匹配文件并导入；缺失项会输出清单。规范全文属于版权内容，
+系统不自动从第三方网站下载 PDF，请使用已获得授权的规范文本。
+
+GB55 系列全套 PDF 可使用专用导入脚本：
+
+```bash
+cd backend
+python scripts/import_gb55_pdfs.py --pdf-dir "D:\GB55规范"
+```
+
+脚本会自动跳过重复文件、误命名文件和实施指南/宣贯解读等非规范正文，只导入单本规范全文；
+所有 `GB55` 编号会自动获得最高优先级。
+
+## 意图识别评测
+
+测试数据：`backend/tests/datasets/intent_router_cases.jsonl`
+
+```bash
+cd backend
+python scripts/eval_intent.py
+```
+
+脚本会输出整体准确率、各类意图召回率和错误分类明细，并生成 `scripts/eval_report.html`。
 
 ## 启动后端
 

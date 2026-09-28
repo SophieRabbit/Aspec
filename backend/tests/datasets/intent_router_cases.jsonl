@@ -1,0 +1,50 @@
+{"id": "intent-001", "intent": "standard_number", "question": "GB50016第5.3.1条", "note": "规范编号+条号精确查询"}
+{"id": "intent-002", "intent": "standard_number", "question": "防火规范3.2.1条", "note": "名称+条号查询"}
+{"id": "intent-003", "intent": "standard_number", "question": "GB 55037-2022第5.2.3条", "note": "带年份编号查询"}
+{"id": "intent-004", "intent": "standard_number", "question": "JGJ 102-2003第4.1.2条", "note": "行业标准编号查询"}
+{"id": "intent-005", "intent": "standard_number", "question": "CJJ 166-2011第3.1.3条", "note": "城建标准编号查询"}
+{"id": "intent-006", "intent": "standard_number", "question": "GB55031 3.2.4条", "note": "无第字条号查询"}
+{"id": "intent-007", "intent": "standard_name", "question": "住宅设计规范", "note": "常见规范名称"}
+{"id": "intent-008", "intent": "standard_name", "question": "无障碍设计规范", "note": "名称查询"}
+{"id": "intent-009", "intent": "standard_name", "question": "民用建筑通用规范", "note": "通用规范名称"}
+{"id": "intent-010", "intent": "standard_name", "question": "建筑防火通用规范", "note": "防火规范名称"}
+{"id": "intent-011", "intent": "standard_name", "question": "城市给水工程通用规范", "note": "市政规范名称"}
+{"id": "intent-012", "intent": "term", "question": "什么叫防火墙", "note": "术语解释"}
+{"id": "intent-013", "intent": "term", "question": "什么是容积率", "note": "概念解释"}
+{"id": "intent-014", "intent": "term", "question": "耐火极限是什么意思", "note": "术语含义"}
+{"id": "intent-015", "intent": "term", "question": "解释一下建筑密度", "note": "要求解释"}
+{"id": "intent-016", "intent": "term", "question": "疏散走道的定义", "note": "定义查询"}
+{"id": "intent-017", "intent": "numeric", "question": "楼梯踏步最小宽度", "note": "指标最小值"}
+{"id": "intent-018", "intent": "numeric", "question": "防火分区最大面积是多少", "note": "指标最大值"}
+{"id": "intent-019", "intent": "numeric", "question": "高层建筑疏散走道净高不应小于多少", "note": "净高限值"}
+{"id": "intent-020", "intent": "numeric", "question": "消防车道宽度不应小于多少米", "note": "宽度限值"}
+{"id": "intent-021", "intent": "numeric", "question": "住宅层高最低要求是多少", "note": "层高限值"}
+{"id": "intent-022", "intent": "numeric", "question": "无障碍坡道坡度不应大于多少", "note": "坡度限值"}
+{"id": "intent-023", "intent": "scenario", "question": "无障碍厕位的全套要求", "note": "场景汇总"}
+{"id": "intent-024", "intent": "scenario", "question": "高层住宅的消防疏散要求", "note": "场景要求"}
+{"id": "intent-025", "intent": "scenario", "question": "地下车库的通风系统怎么做", "note": "做法查询"}
+{"id": "intent-026", "intent": "scenario", "question": "厨房烟道应如何设置", "note": "设置要求"}
+{"id": "intent-027", "intent": "scenario", "question": "电梯前室应满足哪些要求", "note": "满足条件"}
+{"id": "intent-028", "intent": "scenario", "question": "住宅套内防水施工需要怎么做", "note": "施工场景"}
+{"id": "intent-029", "intent": "comparison", "question": "北京和上海的防火规范有什么区别", "note": "跨地区对比"}
+{"id": "intent-030", "intent": "comparison", "question": "比较住宅设计规范和民用建筑通用规范的楼梯规定", "note": "多规范对比"}
+{"id": "intent-031", "intent": "comparison", "question": "GB50016和GB55037对疏散宽度的要求有何不同", "note": "编号对比"}
+{"id": "intent-032", "intent": "comparison", "question": "地方标准和全国规范哪个更严格", "note": "效力严格度对比"}
+{"id": "intent-033", "intent": "comparison", "question": "新旧版本防火规范有什么区别", "note": "版本对比"}
+{"id": "intent-034", "intent": "comparison", "question": "上海和深圳的住宅规范差异", "note": "地区差异"}
+{"id": "intent-035", "intent": "material", "question": "发泡陶瓷的单价是多少", "note": "材料价格"}
+{"id": "intent-036", "intent": "material", "question": "EPS线条施工工艺", "note": "材料工艺"}
+{"id": "intent-037", "intent": "material", "question": "SBS防水卷材多少钱一平方", "note": "材料报价"}
+{"id": "intent-038", "intent": "material", "question": "岩棉板导热系数参数", "note": "材料参数"}
+{"id": "intent-039", "intent": "material", "question": "断桥铝门窗型材品牌和规格", "note": "材料规格"}
+{"id": "intent-040", "intent": "version", "question": "GB50016现在还是现行吗", "note": "编号版本效力"}
+{"id": "intent-041", "intent": "version", "question": "新规什么时候实施", "note": "实施时间"}
+{"id": "intent-042", "intent": "version", "question": "住宅设计规范现在还有效吗", "note": "名称版本效力"}
+{"id": "intent-043", "intent": "version", "question": "新版防火规范什么时候施行", "note": "新版施行时间"}
+{"id": "intent-044", "intent": "version", "question": "旧版规范是否已经废止", "note": "废止状态"}
+{"id": "intent-045", "intent": "colloquial", "question": "楼梯多高合适", "note": "口语高度"}
+{"id": "intent-046", "intent": "colloquial", "question": "楼多高算高层", "note": "口语分类"}
+{"id": "intent-047", "intent": "colloquial", "question": "卫生间能不能挨着厨房", "note": "口语允许性"}
+{"id": "intent-048", "intent": "colloquial", "question": "住宅层高一般多少合适", "note": "口语限值"}
+{"id": "intent-049", "intent": "colloquial", "question": "家里隔断墙能随便拆吗", "note": "口语拆除"}
+{"id": "intent-050", "intent": "colloquial", "question": "防火门是不是必须常闭", "note": "口语要求"}
