@@ -50,6 +50,20 @@ def test_chitchat_does_not_return_standards() -> None:
     assert search.json()["items"] == []
 
 
+def test_uncovered_question_does_not_offer_human_support() -> None:
+    response = client.post(
+        "/api/chat",
+        json={"message": "你知道12星座啊"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "fallback"
+    assert payload["intent_label"] == "未覆盖问题"
+    assert payload["sources"] == []
+    assert "人工" not in payload["reply"]
+    assert "工程建设规范" in payload["reply"]
+
+
 def test_document_context() -> None:
     chat = client.post(
         "/api/chat",

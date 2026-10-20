@@ -14,6 +14,10 @@ const sourceLabels = {
   llm: 'LLM 分类',
   fallback: '低置信度兜底',
 }
+
+const aliasLabels = {
+  fallback: '未覆盖',
+}
 </script>
 
 <template>
@@ -30,6 +34,6 @@ const sourceLabels = {
       <Gauge :size="13" />
       置信度：{{ Math.round((confidence || 0) * 100) }}%
     </span>
-    <span v-if="alias" class="intent-trace-alias">{{ alias }}</span>
+    <span v-if="alias" class="intent-trace-alias">{{ aliasLabels[alias] || alias }}</span>
   </div>
 </template>

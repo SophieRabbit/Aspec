@@ -60,7 +60,7 @@ INTENT_LABELS = {
     INTENT_VERSION: "版本查询",
     INTENT_COLLOQUIAL: "模糊口语",
     INTENT_CHITCHAT: "闲聊问候",
-    INTENT_FALLBACK: "转人工兜底",
+    INTENT_FALLBACK: "未覆盖问题",
 }
 
 INTENT_STRATEGIES: dict[str, dict[str, Any]] = {
@@ -84,7 +84,7 @@ INTENT_STRATEGIES: dict[str, dict[str, Any]] = {
     },
     INTENT_NUMERIC: {
         "primary": "RAG精准定位条文",
-        "fallback": "人工确认",
+        "fallback": "提示补充参数",
         "needs_llm": True,
         "note": "定位指标条文并提取数值",
     },
@@ -125,8 +125,8 @@ INTENT_STRATEGIES: dict[str, dict[str, Any]] = {
         "note": "问候、感谢或身份询问，不触发规范检索",
     },
     INTENT_FALLBACK: {
-        "primary": "转人工/友好回复",
-        "fallback": "友好拒绝",
+        "primary": "说明当前能力范围",
+        "fallback": "友好提示",
         "needs_llm": True,
         "note": "无法由规范知识库处理",
     },
