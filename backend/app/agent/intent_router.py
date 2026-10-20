@@ -18,6 +18,7 @@ INTENT_COMPARISON = "comparison"
 INTENT_MATERIAL = "material"
 INTENT_VERSION = "version"
 INTENT_COLLOQUIAL = "colloquial"
+INTENT_CHITCHAT = "chitchat"
 INTENT_FALLBACK = "fallback"
 
 
@@ -31,6 +32,7 @@ class IntentType(str, Enum):
     MATERIAL = INTENT_MATERIAL
     VERSION = INTENT_VERSION
     COLLOQUIAL = INTENT_COLLOQUIAL
+    CHITCHAT = INTENT_CHITCHAT
     FALLBACK = INTENT_FALLBACK
 
 INTENTS = (
@@ -43,6 +45,7 @@ INTENTS = (
     INTENT_MATERIAL,
     INTENT_VERSION,
     INTENT_COLLOQUIAL,
+    INTENT_CHITCHAT,
     INTENT_FALLBACK,
 )
 
@@ -56,6 +59,7 @@ INTENT_LABELS = {
     INTENT_MATERIAL: "材料查询",
     INTENT_VERSION: "版本查询",
     INTENT_COLLOQUIAL: "模糊口语",
+    INTENT_CHITCHAT: "闲聊问候",
     INTENT_FALLBACK: "转人工兜底",
 }
 
@@ -114,6 +118,12 @@ INTENT_STRATEGIES: dict[str, dict[str, Any]] = {
         "needs_llm": True,
         "note": "改写口语表达后再检索",
     },
+    INTENT_CHITCHAT: {
+        "primary": "直接回复",
+        "fallback": "直接回复",
+        "needs_llm": False,
+        "note": "问候、感谢或身份询问，不触发规范检索",
+    },
     INTENT_FALLBACK: {
         "primary": "转人工/友好回复",
         "fallback": "友好拒绝",
@@ -125,6 +135,17 @@ INTENT_STRATEGIES: dict[str, dict[str, Any]] = {
 _STANDARD_CODE = re.compile(
     r"(?<![A-Za-z0-9])(?:GB|GB/T|JGJ|JG/T|CJJ|CJJ/T|JG|CJ|DB|DBJ|DGJ|T/|Q/|DB31|DB32|DB33|DB34|DB35|DB36|DB37|DB42|DB44|DB50|DB51|DB52|DB53|DB61|DB62|DB63|DB65|DB71|DB81|DB82|DB91|DB92|DB93|DB94|DB95|DB96|DB97|DB98)"
     r"[\s./-]*\d{1,5}(?:\.\d+)?(?:[—-]\d{4}(?:[A-Z])?)?",
+    re.IGNORECASE,
+)
+
+_CHITCHAT_ONLY = re.compile(
+    r"^(?:"
+    r"你好|您好|哈喽|嗨|hello|hi|hey|"
+    r"早上好|上午好|中午好|下午好|晚上好|在吗|在不在|"
+    r"你是谁|你叫什么(?:名字)?|你是什么|"
+    r"谢谢|多谢|感谢|好的|好|嗯+|哦+|ok|okay|收到|知道了"
+    r")"
+    r"[\s，,。.!！?？~～呀啊呢哈啦哟噢哦]*$",
     re.IGNORECASE,
 )
 
@@ -226,6 +247,7 @@ _PRIORITY_ORDER = (
     INTENT_NAME,
     INTENT_SCENARIO,
     INTENT_COLLOQUIAL,
+    INTENT_CHITCHAT,
     INTENT_FALLBACK,
 )
 
@@ -275,6 +297,15 @@ class IntentRouter:
         use_llm: bool = True,
     ) -> IntentResult:
         normalized = self._normalize(query)
+        if self._is_chitchat(normalized):
+            return IntentResult(
+                intent=INTENT_CHITCHAT,
+                confidence=0.99,
+                matched_patterns=(_CHITCHAT_ONLY.pattern,),
+                source="rules",
+                query=normalized,
+                strategy=INTENT_STRATEGIES[INTENT_CHITCHAT],
+            )
         rule_result = self._classify_by_rules(normalized)
         if rule_result.confidence >= self.low_confidence_threshold:
             return rule_result
@@ -313,6 +344,10 @@ class IntentRouter:
         text = re.sub(r"[ \t\u3000]+", " ", text)
         return text
 
+    @staticmethod
+    def _is_chitchat(query: str) -> bool:
+        return bool(_CHITCHAT_ONLY.fullmatch(query.strip()))
+
     def _classify_by_rules(self, query: str) -> IntentResult:
         scores: dict[str, float] = {}
         matched: dict[str, list[str]] = {}
@@ -324,11 +359,11 @@ class IntentRouter:
 
         if not scores:
             return IntentResult(
-                intent=INTENT_SCENARIO,
-                confidence=0.5,
+                intent=INTENT_FALLBACK,
+                confidence=0.55,
                 source="rules",
                 query=query,
-                strategy=INTENT_STRATEGIES[INTENT_SCENARIO],
+                strategy=INTENT_STRATEGIES[INTENT_FALLBACK],
             )
 
         if scores.get(INTENT_COMPARISON, 0.0) > 0:
@@ -437,7 +472,7 @@ class IntentRouter:
         elif re.search(r"(?:画图|设计图|图纸|人工|客服|你们公司|你是谁)", query, re.IGNORECASE):
             intent = INTENT_FALLBACK
         else:
-            intent = INTENT_SCENARIO
+            intent = INTENT_FALLBACK
         return IntentResult(
             intent=intent,
             confidence=0.55,

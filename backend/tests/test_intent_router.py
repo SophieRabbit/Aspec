@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from app.agent.intent_router import (
+    INTENT_CHITCHAT,
     INTENT_COLLOQUIAL,
     INTENT_COMPARISON,
     INTENT_FALLBACK,
@@ -38,6 +39,27 @@ def test_low_confidence_uses_fallback() -> None:
     result = router.classify("随便看看", use_llm=False)
     assert result.intent in {INTENT_SCENARIO, INTENT_COLLOQUIAL}
     assert result.source in {"rules", "fallback"}
+
+
+def test_chitchat_is_detected_without_knowledge_retrieval() -> None:
+    router = IntentRouter()
+    for query in ("你好啊", "您好！", "你是谁？", "谢谢啦", "在吗"):
+        result = router.classify(query, use_llm=False)
+        assert result.intent == INTENT_CHITCHAT, query
+        assert result.confidence >= 0.9
+
+
+def test_greeting_prefix_does_not_hide_a_real_standard_query() -> None:
+    router = IntentRouter()
+    result = router.classify("你好，请问住宅楼梯宽度有什么要求？", use_llm=False)
+    assert result.intent != INTENT_CHITCHAT
+
+
+def test_action_prefixed_standard_query_keeps_standard_intent() -> None:
+    router = IntentRouter()
+    result = router.classify("帮我查下踏步规范", use_llm=False)
+    assert result.intent == INTENT_NAME
+    assert result.confidence > 0
 
 
 def test_llm_second_layer_overrides_low_confidence_rules() -> None:

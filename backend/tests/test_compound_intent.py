@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from app.agent.planner import Planner
+from app.knowledge.loader import KnowledgeBase
 from app.knowledge.region_hierarchy import detect_requested_region
+from app.knowledge.retriever import Retriever
 from services.compound_intent import detect_compound_intent
 from services.region_matcher import detect_region
 
@@ -36,6 +38,43 @@ def test_non_compound_query_falls_back() -> None:
     intent = detect_compound_intent("防火分区面积怎么确定")
 
     assert intent.is_compound is False
+
+
+def test_unrelated_memory_does_not_override_current_constraints() -> None:
+    planner = Planner(Retriever(KnowledgeBase()))
+    query = "帮我查下踏步规范"
+    result = planner.run(
+        query,
+        memory_facts=[
+            {
+                "text": "住宅楼梯踏步宽度和高度有什么要求？",
+                "category": "项目信息",
+            }
+        ],
+        enable_web_search=False,
+    )
+
+    assert result["effective_query"] == query
+    assert result["memory_used"] is False
+    assert "识别到的约束" not in result["reply"]
+
+
+def test_explicit_project_query_can_use_memory_background() -> None:
+    planner = Planner(Retriever(KnowledgeBase()))
+    result = planner.run(
+        "本项目踏步规范",
+        memory_facts=[
+            {
+                "text": "项目信息：建筑类型住宅",
+                "category": "项目信息",
+            }
+        ],
+        enable_web_search=False,
+    )
+
+    assert result["memory_used"] is True
+    assert "项目背景" in result["effective_query"]
+    assert "识别到的约束" not in result["reply"]
 
 
 def test_chengdu_region_is_independent_dimension() -> None:

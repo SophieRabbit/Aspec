@@ -59,6 +59,20 @@ REFERENCE_TERMS = (
     "它",
 )
 
+PROJECT_CONTEXT_TERMS = (
+    "本项目",
+    "这个项目",
+    "该项目",
+    "当前项目",
+    "项目背景",
+    "项目信息",
+    "我们项目",
+    "我们的项目",
+    "这个建筑",
+    "该建筑",
+    "本建筑",
+)
+
 STRICTER_TERMS = ("更严格", "严格", "地方标准", "省级", "省内")
 
 _CLAUSE_NUMBER_RE = re.compile(
@@ -235,10 +249,9 @@ class Planner:
         comparison: dict[str, Any] | None = None
         requested_region = detect_requested_region(query, self.retriever.knowledge_base.documents)
         memory_hint = self._memory_hint(memory_facts)
-        uses_memory = bool(memory_hint) and (
-            any(term in query for term in REFERENCE_TERMS)
-            or detect_requested_region(query, self.retriever.knowledge_base.documents) is None
-        )
+        uses_memory = self._uses_memory(query, memory_hint)
+        if not uses_memory:
+            memory_hint = ""
         inherited_region = (
             requested_region is None
             and bool(previous_query)
@@ -254,6 +267,7 @@ class Planner:
             effective_query = f"{previous_query} {query}"
         if uses_memory:
             effective_query = f"{effective_query}，项目背景：{memory_hint}"
+        constraint_query = self._constraint_query(query, previous_query)
 
         regions = extract_regions(effective_query, self.retriever.knowledge_base.documents)
         if len(regions) >= 2 and any(term in effective_query for term in COMPARISON_TERMS):
@@ -376,7 +390,7 @@ class Planner:
             requested_region=requested_region,
         )
         reply = self._with_compound_intent_header(
-            effective_query,
+            constraint_query,
             reply,
             requested_region=requested_region,
             llm_client=self.llm_client,
@@ -408,10 +422,9 @@ class Planner:
         documents = self.retriever.knowledge_base.documents
         requested_region = detect_requested_region(query, documents)
         memory_hint = self._memory_hint(memory_facts)
-        uses_memory = bool(memory_hint) and (
-            any(term in query for term in REFERENCE_TERMS)
-            or detect_requested_region(query, documents) is None
-        )
+        uses_memory = self._uses_memory(query, memory_hint)
+        if not uses_memory:
+            memory_hint = ""
         inherited_region = (
             requested_region is None
             and bool(previous_query)
@@ -427,6 +440,7 @@ class Planner:
             effective_query = f"{previous_query} {query}"
         if uses_memory:
             effective_query = f"{effective_query}，项目背景：{memory_hint}"
+        constraint_query = self._constraint_query(query, previous_query)
         region_notice = build_region_notice(requested_region, documents)
         context_region_notice = self._visible_region_summary(requested_region, documents)
         context = self._build_agent_context(
@@ -524,7 +538,7 @@ class Planner:
                 requested_region=requested_region,
             )
         final_reply = self._with_compound_intent_header(
-            effective_query,
+            constraint_query,
             final_reply,
             requested_region=requested_region,
             llm_client=self.llm_client,
@@ -935,6 +949,21 @@ class Planner:
             if text and len(text) <= 80:
                 lines.append(text)
         return "；".join(lines)
+
+    @staticmethod
+    def _uses_memory(query: str, memory_hint: str) -> bool:
+        if not memory_hint:
+            return False
+        return any(
+            term in query
+            for term in (*REFERENCE_TERMS, *PROJECT_CONTEXT_TERMS)
+        )
+
+    @staticmethod
+    def _constraint_query(query: str, previous_query: str | None) -> str:
+        if previous_query and any(term in query for term in REFERENCE_TERMS):
+            return f"{previous_query} {query}"
+        return query
 
     @staticmethod
     def _build_web_query(query: str, requested_region: dict[str, Any] | None) -> str:

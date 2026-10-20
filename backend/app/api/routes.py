@@ -10,6 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, Header, HTTPExceptio
 
 from .. import schemas
 from ..agent.intent_router import (
+    INTENT_CHITCHAT,
     INTENT_COLLOQUIAL,
     INTENT_COMPARISON,
     INTENT_FALLBACK,
@@ -45,6 +46,7 @@ INTENT_ALIASES = {
     INTENT_SCENARIO: "scenario_query",
     INTENT_COMPARISON: "compare_query",
     INTENT_COLLOQUIAL: "vague_query",
+    INTENT_CHITCHAT: "chitchat",
     INTENT_FALLBACK: "fallback",
 }
 
@@ -141,6 +143,11 @@ def document_context(doc_id: str, query: str = "") -> schemas.DocumentContext:
 
 @router.get("/search", response_model=schemas.SearchResponse)
 def search_standards(q: str = "") -> schemas.SearchResponse:
+    if not q.strip():
+        return schemas.SearchResponse(query=q, items=[])
+    intent_result = intent_router.classify(q, use_llm=False)
+    if intent_result.intent in {INTENT_CHITCHAT, INTENT_FALLBACK}:
+        return schemas.SearchResponse(query=q, items=[])
     return schemas.SearchResponse(**planner.format_search_list(q))
 
 
@@ -319,6 +326,14 @@ def _intent_result(
         "effective_query": effective_query,
         "memory_used": False,
     }
+
+
+def _chitchat_reply(user_input: str) -> str:
+    if re.search(r"(?:谢谢|多谢|感谢)", user_input):
+        return "不客气！需要查询工程建设规范时，直接告诉我建筑类型、部位或指标就可以。"
+    if re.search(r"(?:你是谁|你叫什么|你是什么)", user_input):
+        return "我是规宝，专门帮你查询工程建设规范。直接描述你想了解的建筑类型、部位或指标即可。"
+    return "你好！我是规宝，可以帮你查询工程建设规范。直接描述你想了解的建筑类型、部位或指标即可。"
 
 
 def _attach_intent(result: dict[str, Any], intent_result: Any) -> dict[str, Any]:
@@ -527,6 +542,16 @@ def handle_query(
                 ),
                 intent_result,
             )
+        if alias == "chitchat":
+            return _attach_intent(
+                _intent_result(
+                    _chitchat_reply(user_input),
+                    "闲聊问候",
+                    "识别为问候或致谢，无需检索规范",
+                    user_input,
+                ),
+                intent_result,
+            )
         if alias == "fallback":
             return _attach_intent(
                 _intent_result(
@@ -583,12 +608,23 @@ def chat(
         memory_facts=memory["facts"],
         enable_web_search=not payload.disable_web_search,
     )
-    exclude_codes = {normalize_code(doc.get("standard", "")) for doc in knowledge_base.documents}
-    keywords = extract_keywords(result.get("effective_query") or payload.message, result.get("requested_region"))
-    recommendations = catalog.recommend(
-        f"{payload.message} {' '.join(source['standard'] for source in result['sources'])}",
-        exclude_codes=exclude_codes,
-    )
+    non_retrieval = result.get("intent") in {INTENT_CHITCHAT, INTENT_FALLBACK}
+    if non_retrieval:
+        keywords = []
+        recommendations = []
+    else:
+        exclude_codes = {
+            normalize_code(doc.get("standard", ""))
+            for doc in knowledge_base.documents
+        }
+        keywords = extract_keywords(
+            result.get("effective_query") or payload.message,
+            result.get("requested_region"),
+        )
+        recommendations = catalog.recommend(
+            f"{payload.message} {' '.join(source['standard'] for source in result['sources'])}",
+            exclude_codes=exclude_codes,
+        )
 
     metadata = {
         "sources": result["sources"],
@@ -614,14 +650,15 @@ def chat(
         metadata=metadata,
         trace_id=trace_id,
     )
-    background_tasks.add_task(
-        memory_store.distill,
-        conversation_id=conversation_id,
-        user_id=user_id,
-        user_message_id=user_message["id"],
-        user_content=payload.message,
-        assistant_content=result["reply"],
-    )
+    if not non_retrieval:
+        background_tasks.add_task(
+            memory_store.distill,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            user_message_id=user_message["id"],
+            user_content=payload.message,
+            assistant_content=result["reply"],
+        )
 
     response = schemas.ChatResponse(
         trace_id=trace_id,

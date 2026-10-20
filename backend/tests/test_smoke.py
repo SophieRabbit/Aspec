@@ -32,6 +32,24 @@ def test_chat_returns_sources() -> None:
     assert payload["keywords"]
 
 
+def test_chitchat_does_not_return_standards() -> None:
+    response = client.post(
+        "/api/chat",
+        json={"message": "你好啊"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "chitchat"
+    assert payload["sources"] == []
+    assert payload["recommendations"] == []
+    assert payload["keywords"] == []
+    assert "你好" in payload["reply"]
+
+    search = client.get("/api/search", params={"q": "你好啊"})
+    assert search.status_code == 200
+    assert search.json()["items"] == []
+
+
 def test_document_context() -> None:
     chat = client.post(
         "/api/chat",

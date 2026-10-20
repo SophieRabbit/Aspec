@@ -20,6 +20,11 @@ const activeConversation = computed(() =>
   conversations.value.find((item) => item.conversation_id === activeId.value),
 )
 
+function shouldSearchStandards(result) {
+  if (['chitchat', 'fallback'].includes(result.intent_alias)) return false
+  return Boolean(result.intent || result.sources?.length)
+}
+
 async function loadConversations() {
   conversations.value = await api.conversations()
 }
@@ -43,7 +48,11 @@ async function restoreHistorySearch(id) {
     if (item.role === 'user') {
       lastUserContent = item.content || ''
     }
-    if (item.role === 'assistant' && lastUserContent) {
+    if (
+      item.role === 'assistant' &&
+      lastUserContent &&
+      shouldSearchStandards(item)
+    ) {
       try {
         const searchResult = await api.search(lastUserContent)
         item.search_items = searchResult.items || []
@@ -99,16 +108,18 @@ async function send(text) {
       message: content,
     })
     let searchItems = []
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const searchResult = await api.search(content)
-        searchItems = searchResult.items || []
-        if (searchItems.length) break
-      } catch {
-        searchItems = []
-      }
-      if (attempt === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 400))
+    if (shouldSearchStandards(result)) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const searchResult = await api.search(content)
+          searchItems = searchResult.items || []
+          if (searchItems.length) break
+        } catch {
+          searchItems = []
+        }
+        if (attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 400))
+        }
       }
     }
     messages.value.push({
