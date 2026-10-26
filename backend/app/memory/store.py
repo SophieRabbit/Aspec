@@ -73,6 +73,15 @@ class MemoryStore:
     def get_messages(self, conversation_id: str, user_id: str = "default") -> list[dict[str, Any]]:
         return self.sql.get_messages(conversation_id, user_id)
 
+    def get_message(self, message_id: str, user_id: str = "default") -> dict[str, Any] | None:
+        return self.sql.get_message(message_id, user_id)
+
+    def save_feedback(self, **values: Any) -> dict[str, Any]:
+        return self.sql.upsert_feedback(**values)
+
+    def list_feedback(self, *, limit: int = 10000) -> list[dict[str, Any]]:
+        return self.sql.list_feedback(limit=limit)
+
     def add_message(
         self,
         conversation_id: str,

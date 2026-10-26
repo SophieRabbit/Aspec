@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import csv
+import hmac
+import io
 import re
 import shutil
 import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, Header, HTTPException, Response, UploadFile
 
 from .. import schemas
 from ..agent.intent_router import (
@@ -21,7 +24,13 @@ from ..agent.intent_router import (
     IntentRouter,
 )
 from ..agent.planner import Planner
-from ..config import DATA_DIR, MEMORY_TOKEN_BUDGET, PRIORITY_STANDARD_BOOST, RETRIEVAL_TOP_K
+from ..config import (
+    DATA_DIR,
+    FEEDBACK_ADMIN_TOKEN,
+    MEMORY_TOKEN_BUDGET,
+    PRIORITY_STANDARD_BOOST,
+    RETRIEVAL_TOP_K,
+)
 from ..knowledge.catalog import Catalog, normalize_code
 from ..knowledge.keywords import extract_keywords
 from ..knowledge.loader import KnowledgeBase
@@ -50,6 +59,24 @@ INTENT_ALIASES = {
     INTENT_FALLBACK: "fallback",
 }
 
+FEEDBACK_REASON_CODES = {
+    "answer_inaccurate",
+    "source_mismatch",
+    "wrong_clause",
+    "incomplete",
+    "missing_content",
+    "misclassified",
+    "hard_to_read",
+    "other",
+}
+
+
+def _csv_safe(value: Any) -> str:
+    text = "" if value is None else str(value)
+    if text.startswith(("=", "+", "-", "@", "\t", "\r")):
+        return f"'{text}"
+    return text
+
 
 def _resolve_user_id(header_user_id: str | None, payload_user_id: str | None = None) -> str:
     raw = header_user_id or payload_user_id or "default"
@@ -60,6 +87,133 @@ def _resolve_user_id(header_user_id: str | None, payload_user_id: str | None = N
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "规宝 API"}
+
+
+@router.post("/feedback", response_model=schemas.FeedbackRecord)
+def submit_feedback(
+    payload: schemas.FeedbackRequest,
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+) -> schemas.FeedbackRecord:
+    user_id = _resolve_user_id(x_user_id)
+    assistant = memory_store.get_message(payload.message_id, user_id)
+    if (
+        not assistant
+        or assistant.get("role") != "assistant"
+        or assistant.get("conversation_id") != payload.conversation_id
+    ):
+        raise HTTPException(status_code=404, detail="回答消息不存在")
+    if payload.trace_id and assistant.get("trace_id") != payload.trace_id:
+        raise HTTPException(status_code=400, detail="反馈关联的对话轨迹不匹配")
+
+    reason_codes = list(dict.fromkeys(payload.reason_codes))
+    invalid_reasons = set(reason_codes) - FEEDBACK_REASON_CODES
+    if invalid_reasons:
+        raise HTTPException(status_code=400, detail="存在无效的反馈原因")
+    if payload.rating == "not_helpful" and not reason_codes and not payload.comment.strip():
+        raise HTTPException(status_code=400, detail="请选择反馈原因或填写补充说明")
+
+    sources = assistant.get("sources") or []
+    if payload.source_doc_id and not any(
+        str(source.get("doc_id", "")) == payload.source_doc_id
+        for source in sources
+    ):
+        raise HTTPException(status_code=400, detail="反馈来源不属于该回答")
+
+    messages = memory_store.get_messages(payload.conversation_id, user_id)
+    assistant_index = next(
+        (
+            index
+            for index, message in enumerate(messages)
+            if str(message.get("id")) == payload.message_id
+        ),
+        -1,
+    )
+    question_snapshot = next(
+        (
+            str(message.get("content", ""))
+            for message in reversed(messages[: max(0, assistant_index)])
+            if message.get("role") == "user"
+        ),
+        "",
+    )
+    feedback = memory_store.save_feedback(
+        user_id=user_id,
+        conversation_id=payload.conversation_id,
+        message_id=payload.message_id,
+        trace_id=assistant.get("trace_id", ""),
+        rating=payload.rating,
+        reason_codes=reason_codes,
+        comment=payload.comment,
+        source_doc_id=payload.source_doc_id,
+        source_article=payload.source_article,
+        intent=str(assistant.get("intent", "")),
+        intent_source=str(assistant.get("intent_source", "")),
+        intent_confidence=float(assistant.get("intent_confidence", 0.0) or 0.0),
+        question_snapshot=question_snapshot,
+        answer_snapshot=str(assistant.get("content", "")),
+        kb_version=f"{knowledge_base.knowledge_base}@{int(knowledge_base.loaded_at)}",
+        app_version="0.1.0",
+    )
+    return schemas.FeedbackRecord(**feedback)
+
+
+@router.get("/feedback/export")
+def export_feedback(
+    x_feedback_admin_token: str | None = Header(
+        default=None,
+        alias="X-Feedback-Admin-Token",
+    ),
+) -> Response:
+    if not FEEDBACK_ADMIN_TOKEN:
+        raise HTTPException(status_code=503, detail="反馈导出尚未配置")
+    if not x_feedback_admin_token or not hmac.compare_digest(
+        x_feedback_admin_token,
+        FEEDBACK_ADMIN_TOKEN,
+    ):
+        raise HTTPException(status_code=403, detail="无权导出反馈")
+
+    rows = memory_store.list_feedback()
+    columns = (
+        "id",
+        "user_id",
+        "conversation_id",
+        "message_id",
+        "trace_id",
+        "rating",
+        "reason_codes",
+        "comment",
+        "source_doc_id",
+        "source_article",
+        "intent",
+        "intent_source",
+        "intent_confidence",
+        "question_snapshot",
+        "answer_snapshot",
+        "kb_version",
+        "app_version",
+        "status",
+        "created_at",
+        "updated_at",
+    )
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        export_row = {
+            **row,
+            "reason_codes": ",".join(row.get("reason_codes", [])),
+        }
+        writer.writerow(
+            {
+                column: _csv_safe(export_row.get(column, ""))
+                for column in columns
+            }
+        )
+    return Response(
+        content="\ufeff" + output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="feedback.csv"'},
+    )
 
 
 @router.get("/knowledge/status", response_model=schemas.KnowledgeStatus)
@@ -249,6 +403,7 @@ def conversation_messages(
     last_user_query = ""
     refreshed: list[schemas.MessageRecord] = []
     for item in records:
+        item["id"] = str(item.get("id", ""))
         if item.get("role") == "user":
             last_user_query = str(item.get("content", ""))
         elif item.get("role") == "assistant" and last_user_query:
@@ -646,7 +801,7 @@ def chat(
         "intent_alias": result.get("intent_alias", ""),
         "trace_id": trace_id,
     }
-    memory_store.add_message(
+    assistant_message = memory_store.add_message(
         conversation_id,
         "assistant",
         result["reply"],
@@ -667,6 +822,7 @@ def chat(
     response = schemas.ChatResponse(
         trace_id=trace_id,
         conversation_id=conversation_id,
+        message_id=assistant_message["id"],
         reply=result["reply"],
         sources=result["sources"],
         reasoning=result["steps"],

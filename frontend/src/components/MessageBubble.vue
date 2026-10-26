@@ -2,6 +2,7 @@
 import { Bot } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 import { highlightKeywords, linkifyUrls, richText } from '../lib/format'
+import FeedbackControls from './FeedbackControls.vue'
 import IntentTrace from './IntentTrace.vue'
 
 const props = defineProps({
@@ -81,6 +82,11 @@ const searchGroups = computed(() => {
         class="message-content"
         v-html="highlightKeywords(linkifyUrls(richText(message.content)), message.keywords || [])"
       ></div>
+
+      <FeedbackControls
+        v-if="message.role === 'assistant'"
+        :message="message"
+      />
 
       <div v-if="message.follow_ups?.length" class="followup-section">
         <button

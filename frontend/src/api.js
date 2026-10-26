@@ -60,4 +60,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  submitFeedback: (payload) =>
+    request('/api/feedback', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 }

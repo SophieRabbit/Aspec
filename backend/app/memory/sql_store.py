@@ -37,6 +37,12 @@ def _row_dict(row: Any) -> dict[str, Any]:
     return dict(row._mapping)
 
 
+def _feedback_row_dict(row: Any) -> dict[str, Any]:
+    item = _row_dict(row)
+    item["reason_codes"] = json.loads(item.pop("reason_codes_json") or "[]")
+    return item
+
+
 class SqlMemoryStore:
     """SQL storage for raw conversations and the structured memory library."""
 
@@ -112,6 +118,33 @@ class SqlMemoryStore:
             Column("created_at", String(40), nullable=False),
             Column("updated_at", String(40), nullable=False),
             Index("ix_memory_jobs_user_status", "user_id", "status", "created_at"),
+        )
+        self.feedback = Table(
+            "feedback",
+            self.metadata,
+            Column("id", String(32), primary_key=True),
+            Column("user_id", String(128), nullable=False),
+            Column("conversation_id", String(64), nullable=False),
+            Column("message_id", String(64), nullable=False),
+            Column("trace_id", String(64), nullable=False, default=""),
+            Column("rating", String(16), nullable=False),
+            Column("reason_codes_json", Text, nullable=False, default="[]"),
+            Column("comment", Text, nullable=False, default=""),
+            Column("source_doc_id", String(128), nullable=False, default=""),
+            Column("source_article", String(64), nullable=False, default=""),
+            Column("intent", String(32), nullable=False, default=""),
+            Column("intent_source", String(32), nullable=False, default=""),
+            Column("intent_confidence", String(16), nullable=False, default="0"),
+            Column("question_snapshot", Text, nullable=False, default=""),
+            Column("answer_snapshot", Text, nullable=False, default=""),
+            Column("kb_version", String(64), nullable=False, default=""),
+            Column("app_version", String(32), nullable=False, default=""),
+            Column("status", String(16), nullable=False, default="new"),
+            Column("created_at", String(40), nullable=False),
+            Column("updated_at", String(40), nullable=False),
+            UniqueConstraint("user_id", "message_id", name="uq_feedback_user_message"),
+            Index("ix_feedback_conversation", "conversation_id", "created_at"),
+            Index("ix_feedback_rating", "rating", "created_at"),
         )
         self.init_schema()
 
@@ -248,6 +281,12 @@ class SqlMemoryStore:
                     self.messages.c.user_id == user_id,
                 )
             )
+            connection.execute(
+                self.feedback.delete().where(
+                    self.feedback.c.conversation_id == conversation_id,
+                    self.feedback.c.user_id == user_id,
+                )
+            )
         return result.rowcount > 0
 
     def add_message(
@@ -319,6 +358,16 @@ class SqlMemoryStore:
                 )
                 .order_by(self.messages.c.id.asc())
             ).fetchall()
+            feedback_rows = connection.execute(
+                select(self.feedback).where(
+                    self.feedback.c.conversation_id == conversation_id,
+                    self.feedback.c.user_id == user_id,
+                )
+            ).fetchall()
+        feedback_by_message = {
+            item["message_id"]: item
+            for item in (_feedback_row_dict(row) for row in feedback_rows)
+        }
         messages: list[dict[str, Any]] = []
         for row in rows:
             row = _row_dict(row)
@@ -332,6 +381,7 @@ class SqlMemoryStore:
             }
             metadata = json.loads(row["metadata_json"] or "{}")
             item.update(metadata)
+            item["feedback"] = feedback_by_message.get(str(row["id"]))
             messages.append(item)
         return messages
 
@@ -361,6 +411,96 @@ class SqlMemoryStore:
         metadata = json.loads(row["metadata_json"] or "{}")
         item.update(metadata)
         return item
+
+    def upsert_feedback(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        message_id: str,
+        trace_id: str,
+        rating: str,
+        reason_codes: list[str],
+        comment: str,
+        source_doc_id: str,
+        source_article: str,
+        intent: str,
+        intent_source: str,
+        intent_confidence: float,
+        question_snapshot: str,
+        answer_snapshot: str,
+        kb_version: str,
+        app_version: str,
+    ) -> dict[str, Any]:
+        timestamp = _now()
+        values = {
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "message_id": message_id,
+            "trace_id": trace_id[:64],
+            "rating": rating,
+            "reason_codes_json": json.dumps(reason_codes, ensure_ascii=False),
+            "comment": comment.strip()[:1000],
+            "source_doc_id": source_doc_id.strip()[:128],
+            "source_article": source_article.strip()[:64],
+            "intent": intent[:32],
+            "intent_source": intent_source[:32],
+            "intent_confidence": str(intent_confidence),
+            "question_snapshot": question_snapshot[:4000],
+            "answer_snapshot": answer_snapshot[:4000],
+            "kb_version": kb_version[:64],
+            "app_version": app_version[:32],
+            "status": "new",
+            "updated_at": timestamp,
+        }
+        with self.engine.begin() as connection:
+            existing_row = connection.execute(
+                select(self.feedback).where(
+                    self.feedback.c.user_id == user_id,
+                    self.feedback.c.message_id == message_id,
+                )
+            ).first()
+            if existing_row:
+                existing = _feedback_row_dict(existing_row)
+                connection.execute(
+                    self.feedback.update()
+                    .where(self.feedback.c.id == existing["id"])
+                    .values(**values)
+                )
+                return {
+                    **existing,
+                    **values,
+                    "reason_codes": reason_codes,
+                    "reason_codes_json": values["reason_codes_json"],
+                }
+            feedback_id = uuid.uuid4().hex[:12]
+            connection.execute(
+                self.feedback.insert().values(
+                    id=feedback_id,
+                    created_at=timestamp,
+                    **values,
+                )
+            )
+        return {
+            "id": feedback_id,
+            "created_at": timestamp,
+            **values,
+            "reason_codes": reason_codes,
+        }
+
+    def list_feedback(
+        self,
+        *,
+        user_id: str | None = None,
+        limit: int = 10000,
+    ) -> list[dict[str, Any]]:
+        statement = select(self.feedback)
+        if user_id:
+            statement = statement.where(self.feedback.c.user_id == user_id)
+        statement = statement.order_by(self.feedback.c.updated_at.desc()).limit(limit)
+        with self.engine.connect() as connection:
+            rows = connection.execute(statement).fetchall()
+        return [_feedback_row_dict(row) for row in rows]
 
     def upsert_memory_item(
         self,

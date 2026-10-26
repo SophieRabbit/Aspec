@@ -200,6 +200,24 @@ python scripts/eval_intent.py
 
 脚本会输出整体准确率、各类意图召回率和错误分类明细，并生成 `scripts/eval_report.html`。
 
+## 用户反馈
+
+每条助手回答底部提供“有帮助 / 没帮助”反馈。选择“没帮助”时，可以提交问题标签和补充说明。
+反馈会关联会话、回答消息、`trace_id`、意图识别结果、知识库版本和回答快照，便于后续分析。
+
+配置管理员令牌后，可以导出全部反馈：
+
+```bash
+FEEDBACK_ADMIN_TOKEN=your-secret-token
+```
+
+```text
+GET /api/feedback/export
+X-Feedback-Admin-Token: your-secret-token
+```
+
+未配置令牌时，导出接口保持关闭。
+
 ## 启动后端
 
 ```bash

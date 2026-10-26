@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -56,6 +57,7 @@ class MemoryInfo(BaseModel):
 class ChatResponse(BaseModel):
     trace_id: str = ""
     conversation_id: str
+    message_id: str = ""
     reply: str
     sources: list[Source] = []
     reasoning: list[ReasoningStep] = []
@@ -83,7 +85,33 @@ class ConversationSummary(BaseModel):
     user_id: str = "default"
 
 
+class FeedbackRecord(BaseModel):
+    id: str
+    message_id: str
+    trace_id: str = ""
+    rating: Literal["helpful", "not_helpful"]
+    reason_codes: list[str] = []
+    comment: str = ""
+    source_doc_id: str = ""
+    source_article: str = ""
+    status: str = "new"
+    created_at: datetime
+    updated_at: datetime
+
+
+class FeedbackRequest(BaseModel):
+    conversation_id: str = Field(min_length=1, max_length=64)
+    message_id: str = Field(min_length=1, max_length=64)
+    trace_id: str = Field(default="", max_length=64)
+    rating: Literal["helpful", "not_helpful"]
+    reason_codes: list[str] = Field(default_factory=list, max_length=8)
+    comment: str = Field(default="", max_length=1000)
+    source_doc_id: str = Field(default="", max_length=128)
+    source_article: str = Field(default="", max_length=64)
+
+
 class MessageRecord(BaseModel):
+    id: str = ""
     trace_id: str = ""
     role: str
     content: str
@@ -101,6 +129,7 @@ class MessageRecord(BaseModel):
     intent_source: str = ""
     intent_confidence: float = 0.0
     intent_alias: str = ""
+    feedback: FeedbackRecord | None = None
 
 
 class KnowledgeStatus(BaseModel):

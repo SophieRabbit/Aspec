@@ -1,0 +1,81 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: 会话
+      - button [ref=e7] [cursor=pointer]
+    - button "新建会话" [ref=e11] [cursor=pointer]
+    - button "住宅楼梯踏步宽度和高度有什么要求？ 2 条消息 · 13:04" [ref=e62] [cursor=pointer]:
+      - generic [ref=e65]:
+        - generic [ref=e66]: 住宅楼梯踏步宽度和高度有什么要求？
+        - generic [ref=e67]: 2 条消息 · 13:04
+  - generic [ref=e16]:
+    - generic [ref=e17]:
+      - generic [ref=e18]: 规宝
+      - navigation "主导航" [ref=e23]:
+        - button "首页" [ref=e24] [cursor=pointer]
+      - generic "住宅楼梯踏步宽度和高度有什么要求？" [ref=e68]
+      - generic [ref=e26]:
+        - generic "知识库状态" [ref=e27]: 203 份规范 · 117 项标准
+        - button "新对话" [ref=e33] [cursor=pointer]
+    - generic [ref=e36]:
+      - generic [ref=e69]:
+        - article [ref=e70]:
+          - generic [ref=e71]: 住宅楼梯踏步宽度和高度有什么要求？
+        - article [ref=e73]:
+          - generic [ref=e78]:
+            - generic [ref=e79]:
+              - generic [ref=e80]: 意图：数值查询
+              - generic [ref=e84]: 层级：规则匹配
+              - generic [ref=e89]: 置信度：71%
+              - generic [ref=e93]: numeric_value
+            - generic [ref=e94]:
+              - generic [ref=e95]: 【国家标准】
+              - table [ref=e96]:
+                - rowgroup [ref=e97]:
+                  - row [ref=e98]:
+                    - columnheader "规范编号" [ref=e99]
+                    - columnheader "规范名称" [ref=e100]
+                    - columnheader "状态" [ref=e101]
+                    - columnheader "实施日期" [ref=e102]
+                    - columnheader "操作" [ref=e103]
+                - rowgroup [ref=e104]:
+                  - row [ref=e105]:
+                    - cell "GB50096-2011" [ref=e106]
+                    - cell "住宅设计规范" [ref=e107]
+                    - cell "现行有效" [ref=e108]
+                    - cell "2012-08-01" [ref=e109]
+                    - cell [ref=e110]:
+                      - button "点击查看详情 →" [ref=e111] [cursor=pointer]
+                  - row [ref=e112]:
+                    - cell "GB55038-2025" [ref=e113]
+                    - cell "住宅项目规范" [ref=e114]
+                    - cell "现行有效" [ref=e115]
+                    - cell "2025-10-01" [ref=e116]
+                    - cell [ref=e117]:
+                      - button "点击查看详情 →" [ref=e118] [cursor=pointer]
+                  - row [ref=e119]:
+                    - cell "GB55031-2022" [ref=e120]
+                    - cell "民用建筑通用规范" [ref=e121]
+                    - cell "现行有效" [ref=e122]
+                    - cell "2023-03-01" [ref=e123]
+                    - cell [ref=e124]:
+                      - button "点击查看详情 →" [ref=e125] [cursor=pointer]
+            - generic [ref=e126]:
+              - text: 识别到的约束： 建筑类型：
+              - generic [ref=e127]: 住宅建筑
+              - text: 检索目标：楼梯宽度已检索到相关规范条文，请查看来源。
+            - generic [ref=e129]:
+              - generic [ref=e130]: 这个回答有帮助吗？
+              - button "这个回答有帮助" [ref=e131] [cursor=pointer]: 有帮助
+              - button "这个回答没有帮助" [ref=e134] [cursor=pointer]: 没帮助
+            - button "💡 你可能还想问 ▼" [ref=e138] [cursor=pointer]:
+              - text: 💡 你可能还想问
+              - generic [ref=e139]: ▼
+            - generic [ref=e140]:
+              - generic [ref=e141]:
+                - generic [ref=e142]: 网络检索结果
+                - generic [ref=e143]: 来源于网络搜索，请核实
+              - generic [ref=e144]: 当前环境无法完成联网检索（网络受限或搜索引擎不可访问），可检查网络或配置搜索 API 后重试。
+      - generic [ref=e57]:
+        - textbox "输入规范问题，Enter 发送" [ref=e58]
+        - button [disabled] [ref=e59]

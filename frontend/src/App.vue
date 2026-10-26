@@ -124,6 +124,9 @@ async function send(text) {
     }
     messages.value.push({
       role: 'assistant',
+      conversation_id: result.conversation_id,
+      message_id: result.message_id,
+      trace_id: result.trace_id,
       content: result.reply,
       sources: result.sources,
       reasoning: result.reasoning,

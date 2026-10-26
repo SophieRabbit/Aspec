@@ -1,5 +1,8 @@
+import uuid
+
 from fastapi.testclient import TestClient
 
+from app.api import routes as api_routes
 from app.main import app
 
 
@@ -62,6 +65,86 @@ def test_uncovered_question_does_not_offer_human_support() -> None:
     assert payload["sources"] == []
     assert "人工" not in payload["reply"]
     assert "工程建设规范" in payload["reply"]
+
+
+def test_feedback_round_trip_and_update() -> None:
+    user_id = f"feedback-{uuid.uuid4().hex[:8]}"
+    headers = {"X-User-Id": user_id}
+    chat = client.post(
+        "/api/chat",
+        headers=headers,
+        json={
+            "message": "住宅楼梯踏步宽度有什么要求？",
+            "disable_web_search": True,
+        },
+    ).json()
+    assert chat["message_id"]
+
+    feedback_payload = {
+        "conversation_id": chat["conversation_id"],
+        "message_id": chat["message_id"],
+        "trace_id": chat["trace_id"],
+        "rating": "not_helpful",
+        "reason_codes": ["incomplete"],
+        "comment": "希望补充条文出处",
+    }
+    first = client.post("/api/feedback", headers=headers, json=feedback_payload)
+    assert first.status_code == 200
+    first_payload = first.json()
+    assert first_payload["rating"] == "not_helpful"
+    assert first_payload["reason_codes"] == ["incomplete"]
+
+    second = client.post(
+        "/api/feedback",
+        headers=headers,
+        json={**feedback_payload, "reason_codes": ["wrong_clause", "incomplete"]},
+    )
+    assert second.status_code == 200
+    second_payload = second.json()
+    assert second_payload["id"] == first_payload["id"]
+    assert second_payload["reason_codes"] == ["wrong_clause", "incomplete"]
+
+    messages = client.get(
+        f"/api/conversations/{chat['conversation_id']}/messages",
+        headers=headers,
+    ).json()
+    assistant = next(item for item in messages if item["role"] == "assistant")
+    assert assistant["id"] == chat["message_id"]
+    assert assistant["feedback"]["id"] == first_payload["id"]
+
+
+def test_feedback_rejects_another_users_message() -> None:
+    owner = f"feedback-owner-{uuid.uuid4().hex[:8]}"
+    other = f"feedback-other-{uuid.uuid4().hex[:8]}"
+    chat = client.post(
+        "/api/chat",
+        headers={"X-User-Id": owner},
+        json={"message": "你好", "disable_web_search": True},
+    ).json()
+    response = client.post(
+        "/api/feedback",
+        headers={"X-User-Id": other},
+        json={
+            "conversation_id": chat["conversation_id"],
+            "message_id": chat["message_id"],
+            "rating": "helpful",
+        },
+    )
+    assert response.status_code == 404
+
+
+def test_feedback_export_requires_admin_token(monkeypatch) -> None:
+    monkeypatch.setattr(api_routes, "FEEDBACK_ADMIN_TOKEN", "test-feedback-token")
+    denied = client.get("/api/feedback/export")
+    assert denied.status_code == 403
+
+    exported = client.get(
+        "/api/feedback/export",
+        headers={"X-Feedback-Admin-Token": "test-feedback-token"},
+    )
+    assert exported.status_code == 200
+    assert exported.content.startswith(b"\xef\xbb\xbf")
+    assert "rating" in exported.text
 
 
 def test_document_context() -> None:
