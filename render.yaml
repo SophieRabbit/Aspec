@@ -25,6 +25,16 @@ services:
           property: host
       - key: AGENT_FUNCTION_CALLING_ENABLED
         value: "1"
+      - key: WEB_SEARCH_ENABLED
+        value: "0"
+      - key: AGENT_MAX_TOOL_TURNS
+        value: "2"
+      - key: AGENT_TOOL_RESULT_CHARS
+        value: "8000"
+      - key: AGENT_LLM_MAX_TOKENS
+        value: "1200"
+      - key: MEMORY_LLM_ENABLED
+        value: "0"
       - key: MEMORY_IMPORT_JSON
         value: "0"
       - key: LLM_API_BASE
@@ -77,6 +87,8 @@ services:
           property: connectionString
       - key: AGENT_FUNCTION_CALLING_ENABLED
         value: "1"
+      - key: MEMORY_LLM_ENABLED
+        value: "0"
       - key: LLM_API_BASE
         sync: false
       - key: LLM_API_KEY

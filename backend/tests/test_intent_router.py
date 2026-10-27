@@ -49,6 +49,20 @@ def test_chitchat_is_detected_without_knowledge_retrieval() -> None:
         assert result.confidence >= 0.9
 
 
+def test_explicit_out_of_scope_question_skips_llm_classification() -> None:
+    class FakeLLM:
+        enabled = True
+
+        def chat(self, messages: list[dict], tools=None, *, tool_choice="auto") -> dict:
+            raise AssertionError("LLM should not classify an explicit out-of-scope question")
+
+    router = IntentRouter(FakeLLM())
+    result = router.classify("你还知道生肖吗", use_llm=True)
+    assert result.intent == INTENT_FALLBACK
+    assert result.source == "rules"
+    assert result.confidence >= router.low_confidence_threshold
+
+
 def test_greeting_prefix_does_not_hide_a_real_standard_query() -> None:
     router = IntentRouter()
     result = router.classify("你好，请问住宅楼梯宽度有什么要求？", use_llm=False)

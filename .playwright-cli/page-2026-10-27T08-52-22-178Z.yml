@@ -1,0 +1,27 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: 会话
+      - button [ref=e7] [cursor=pointer]
+    - button "新建会话" [ref=e11] [cursor=pointer]
+    - generic [ref=e14]: 暂无会话
+  - generic [ref=e16]:
+    - generic [ref=e17]:
+      - generic [ref=e18]: 规宝
+      - navigation "主导航" [ref=e23]:
+        - button "首页" [ref=e24] [cursor=pointer]
+      - generic [ref=e25]: 工程规范智能问答
+      - generic [ref=e26]:
+        - generic "知识库状态" [ref=e27]: 203 份规范 · 117 项标准
+        - button "新对话" [ref=e33] [cursor=pointer]
+    - generic [ref=e36]:
+      - generic [ref=e37]:
+        - heading "规宝" [level=2] [ref=e41]
+        - paragraph [ref=e42]: 工程规范智能问答
+        - generic [ref=e43]:
+          - button "住宅楼梯踏步宽度和高度有什么要求？" [ref=e44] [cursor=pointer]
+          - button "高层公共建筑防火分区最大允许面积是多少？" [ref=e48] [cursor=pointer]
+          - button "比较住宅设计规范和民用建筑通用规范的楼梯规定" [ref=e52] [cursor=pointer]
+      - generic [ref=e57]:
+        - textbox "输入规范问题，Enter 发送" [ref=e58]
+        - button [disabled] [ref=e59]

@@ -17,6 +17,7 @@ const sourceLabels = {
 
 const aliasLabels = {
   fallback: '未覆盖',
+  outside_region: '大陆以外',
 }
 </script>
 

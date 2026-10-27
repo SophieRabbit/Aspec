@@ -5,7 +5,9 @@ import AppHeader from './components/AppHeader.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import ConversationSidebar from './components/ConversationSidebar.vue'
 import DocumentModal from './components/DocumentModal.vue'
+import FeedbackDashboard from './components/FeedbackDashboard.vue'
 
+const isDashboardRoute = window.location.pathname.replace(/\/+$/, '') === '/dashboard'
 const conversations = ref([])
 const activeId = ref(null)
 const messages = ref([])
@@ -21,8 +23,23 @@ const activeConversation = computed(() =>
 )
 
 function shouldSearchStandards(result) {
-  if (['chitchat', 'fallback'].includes(result.intent_alias)) return false
+  if (['chitchat', 'fallback', 'outside_region'].includes(result.intent_alias)) {
+    return false
+  }
   return Boolean(result.intent || result.sources?.length)
+}
+
+function filterSearchItems(result, items) {
+  if (result.intent_alias !== 'compare_query') return items
+  const comparedStandards = new Set(
+    (result.sources || []).map((source) =>
+      String(source.standard || '').replace(/\s+/g, ''),
+    ),
+  )
+  if (!comparedStandards.size) return []
+  return items.filter((item) =>
+    comparedStandards.has(String(item.standard || '').replace(/\s+/g, '')),
+  )
 }
 
 async function loadConversations() {
@@ -55,7 +72,10 @@ async function restoreHistorySearch(id) {
     ) {
       try {
         const searchResult = await api.search(lastUserContent)
-        item.search_items = searchResult.items || []
+        item.search_items = filterSearchItems(
+          item,
+          searchResult.items || [],
+        )
       } catch {
         item.search_items = item.search_items || []
       }
@@ -112,7 +132,7 @@ async function send(text) {
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           const searchResult = await api.search(content)
-          searchItems = searchResult.items || []
+          searchItems = filterSearchItems(result, searchResult.items || [])
           if (searchItems.length) break
         } catch {
           searchItems = []
@@ -175,6 +195,7 @@ function openDocument(detail) {
 }
 
 onMounted(async () => {
+  if (isDashboardRoute) return
   if ('scrollRestoration' in history) {
     history.scrollRestoration = 'manual'
   }
@@ -188,7 +209,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="app-shell">
+  <FeedbackDashboard v-if="isDashboardRoute" />
+  <div v-else class="app-shell">
     <div
       v-if="sidebarOpen"
       class="sidebar-overlay"

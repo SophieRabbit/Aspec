@@ -65,4 +65,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  feedbackDashboard: (authorization) =>
+    request('/api/admin/feedback/dashboard', {
+      headers: { Authorization: authorization },
+    }),
 }

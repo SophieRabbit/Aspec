@@ -235,6 +235,8 @@ button {
 }
 
 .header-nav-link {
+  display: flex;
+  align-items: center;
   height: 34px;
   padding: 0 12px;
   border: 0;
@@ -242,6 +244,7 @@ button {
   background: transparent;
   color: var(--text-secondary);
   font-size: 14px;
+  text-decoration: none;
   cursor: pointer;
   transition: background .15s ease, color .15s ease;
 }
@@ -493,6 +496,17 @@ button {
   margin: 10px 0;
   border-collapse: collapse;
   font-size: 13px;
+}
+
+.msg-table-wrap {
+  max-width: 100%;
+  margin: 10px 0;
+  overflow-x: auto;
+}
+
+.msg-table-wrap .msg-table {
+  min-width: 680px;
+  margin: 0;
 }
 
 .msg-table th,

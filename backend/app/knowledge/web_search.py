@@ -207,5 +207,5 @@ def web_search(query: str, limit: int = 5, timeout: float = 5.0) -> list[dict[st
 
 def web_note(results: list[dict[str, Any]]) -> str:
     if not results:
-        return "当前环境无法完成联网检索（网络受限或搜索引擎不可访问），可检查网络或配置搜索 API 后重试。"
+        return ""
     return f"以下内容来源于网络搜索，共 {len(results)} 条，请人工核实后再引用。"

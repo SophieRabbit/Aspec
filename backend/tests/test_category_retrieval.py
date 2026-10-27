@@ -91,6 +91,51 @@ def test_commercial_stair_dimension_prioritizes_jgj48_and_filters_obsolete() -> 
     )
 
 
+def test_named_residential_stair_comparison_is_structured_and_focused() -> None:
+    planner = Planner(Retriever(KnowledgeBase()))
+
+    result = planner.run(
+        "比较住宅设计规范和民用建筑通用规范的楼梯规定",
+        enable_function_calling=False,
+        enable_web_search=False,
+    )
+
+    reply = result["reply"]
+    assert "| 对比项 | GB50096-2011《住宅设计规范》" in reply
+    assert "GB55031-2022《民用建筑通用规范》" in reply
+    assert "梯段净宽" in reply
+    assert "踏步尺寸" in reply
+    assert "休息平台" in reply
+    assert "梯段净高≥2.20m" in reply
+    assert "第6.3.1条（第19页）" in reply
+    assert "第5.3.7条（第21页）" in reply
+    assert "GB55038-2025" not in reply
+    assert "阳台栏杆" not in reply
+    assert len(reply) < 2500
+    assert {source["standard"] for source in result["sources"]} == {
+        "GB50096-2011",
+        "GB55031-2022",
+    }
+
+
+def test_stair_and_step_comparison_queries_return_identical_results() -> None:
+    planner = Planner(Retriever(KnowledgeBase()))
+
+    stair_result = planner.run(
+        "比较住宅设计规范和民用建筑通用规范的楼梯规定",
+        enable_function_calling=False,
+        enable_web_search=False,
+    )
+    step_result = planner.run(
+        "比较住宅设计规范和民用建筑通用规范的踏步规定",
+        enable_function_calling=False,
+        enable_web_search=False,
+    )
+
+    assert step_result["reply"] == stair_result["reply"]
+    assert step_result["sources"] == stair_result["sources"]
+
+
 def test_standard_list_prioritizes_jgj48_and_hides_obsolete() -> None:
     planner = Planner(Retriever(KnowledgeBase()))
 

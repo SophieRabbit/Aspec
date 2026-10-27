@@ -31,7 +31,7 @@
 用户提问
   -> LLM 收到 tools 列表
   -> LLM 自主决策返回 tool_call
-  -> 后端执行 retrieve_standards / calculate_expression / compare_standards / web_search
+  -> 后端执行 retrieve_standards / calculate_expression / compare_standards
   -> 工具结果回传给 LLM
   -> LLM 生成最终答案
 ```
@@ -40,10 +40,19 @@
 
 ```bash
 AGENT_FUNCTION_CALLING_ENABLED=1
-AGENT_MAX_TOOL_TURNS=4
+AGENT_MAX_TOOL_TURNS=2
 AGENT_LLM_TIMEOUT_SECONDS=20
-AGENT_TOOL_RESULT_CHARS=12000
+AGENT_TOOL_RESULT_CHARS=8000
+AGENT_LLM_MAX_TOKENS=1200
 ```
+
+联网搜索默认关闭，避免普通问题产生额外网页请求和上下文 token。只有在服务端设置
+`WEB_SEARCH_ENABLED=1`，并且 API 请求显式传入 `disable_web_search=false` 时，
+智能体才会看到 `web_search` 工具；即使启用，也只允许在本地规范库依据不足时尝试一次。
+
+每个问题的 Agent 循环最多执行两轮模型回复：第一轮最多调用一次本地工具，第二轮强制生成
+最终答案。工具结果最多回传 8000 字符，模型单次输出上限为 1200 token。结构化记忆默认改用
+本地规则提取；需要恢复 LLM 记忆提炼时再显式设置 `MEMORY_LLM_ENABLED=1`。
 
 每次工具调用都会写入现有 `reasoning` / `steps`，前端推理过程展示不需要改动。
 
@@ -99,7 +108,7 @@ MEMORY_MAX_ITEMS_PER_USER=500
 LLM_API_BASE=https://api.openai.com/v1
 LLM_API_KEY=sk-xxxx
 LLM_MODEL=gpt-4o-mini
-MEMORY_LLM_ENABLED=1
+MEMORY_LLM_ENABLED=0
 MEMORY_LLM_TIMEOUT_SECONDS=20
 MEMORY_MAX_FACTS_PER_TURN=12
 ```
@@ -204,6 +213,17 @@ python scripts/eval_intent.py
 
 每条助手回答底部提供“有帮助 / 没帮助”反馈。选择“没帮助”时，可以提交问题标签和补充说明。
 反馈会关联会话、回答消息、`trace_id`、意图识别结果、知识库版本和回答快照，便于后续分析。
+
+同站反馈看板仅供产品经理收藏使用，不展示在普通用户导航中。内部地址为 `/dashboard`，
+包含反馈总数、有帮助率、14 天趋势、负反馈原因、问题类型分布和最近 30 条反馈。
+看板数据接口也要求登录，不能绕过前端直接匿名读取。
+
+```bash
+FEEDBACK_DASHBOARD_USERNAME=zwszff
+FEEDBACK_DASHBOARD_PASSWORD=change-me
+```
+
+生产环境务必通过环境变量设置独立强密码，并确保站点使用 HTTPS。
 
 配置管理员令牌后，可以导出全部反馈：
 

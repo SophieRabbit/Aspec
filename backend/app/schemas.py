@@ -10,7 +10,7 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = None
     message: str = Field(min_length=1, max_length=4000)
     trace_id: str | None = None
-    disable_web_search: bool = False
+    disable_web_search: bool = True
     user_id: str | None = None
 
 
@@ -108,6 +108,51 @@ class FeedbackRequest(BaseModel):
     comment: str = Field(default="", max_length=1000)
     source_doc_id: str = Field(default="", max_length=128)
     source_article: str = Field(default="", max_length=64)
+
+
+class FeedbackDashboardSummary(BaseModel):
+    total: int
+    helpful: int
+    not_helpful: int
+    helpful_rate: float
+    users: int
+
+
+class FeedbackDashboardTrendPoint(BaseModel):
+    date: str
+    total: int
+    helpful: int
+    not_helpful: int
+
+
+class FeedbackDashboardCount(BaseModel):
+    name: str
+    count: int
+
+
+class FeedbackDashboardItem(BaseModel):
+    id: str
+    user_id: str
+    rating: Literal["helpful", "not_helpful"]
+    reason_codes: list[str] = []
+    comment: str = ""
+    question: str = ""
+    answer: str = ""
+    intent: str = ""
+    intent_source: str = ""
+    trace_id: str = ""
+    kb_version: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class FeedbackDashboardResponse(BaseModel):
+    generated_at: str
+    summary: FeedbackDashboardSummary
+    trend: list[FeedbackDashboardTrendPoint] = []
+    reasons: list[FeedbackDashboardCount] = []
+    intents: list[FeedbackDashboardCount] = []
+    recent: list[FeedbackDashboardItem] = []
 
 
 class MessageRecord(BaseModel):

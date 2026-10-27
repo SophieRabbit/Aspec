@@ -247,7 +247,11 @@ export function markdownTableToHtml(
     html += renderRow(row, 'td')
     html += '</tr>'
   }
-  return html + '</tbody></table>'
+  html += '</tbody></table>'
+  if (tableClass === 'msg-table') {
+    return `<div class="msg-table-wrap">${html}</div>`
+  }
+  return html
 }
 
 export function richText(value) {

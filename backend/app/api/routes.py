@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import base64
 import csv
 import hmac
 import io
 import re
 import shutil
 import uuid
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, Header, HTTPException, Response, UploadFile
 
@@ -27,13 +31,21 @@ from ..agent.planner import Planner
 from ..config import (
     DATA_DIR,
     FEEDBACK_ADMIN_TOKEN,
+    FEEDBACK_DASHBOARD_PASSWORD,
+    FEEDBACK_DASHBOARD_USERNAME,
     MEMORY_TOKEN_BUDGET,
     PRIORITY_STANDARD_BOOST,
     RETRIEVAL_TOP_K,
+    WEB_SEARCH_ENABLED,
 )
 from ..knowledge.catalog import Catalog, normalize_code
 from ..knowledge.keywords import extract_keywords
 from ..knowledge.loader import KnowledgeBase
+from ..knowledge.mainland_scope import (
+    OUTSIDE_MAINLAND_INTENT,
+    detect_outside_mainland_place,
+    outside_mainland_result,
+)
 from ..knowledge.region_hierarchy import detect_requested_region
 from ..knowledge.retriever import Retriever, tokenize
 from ..memory.store import MemoryStore
@@ -58,6 +70,24 @@ INTENT_ALIASES = {
     INTENT_CHITCHAT: "chitchat",
     INTENT_FALLBACK: "fallback",
 }
+
+OUT_OF_SCOPE_REPLY = (
+    "抱歉，这个问题与工程建设规范无关，我无法回答。"
+    "请提出工程建设规范相关问题。"
+)
+
+OUTSIDE_MAINLAND_LABEL = "中国大陆以外"
+REGION_CONTEXT_TERMS = (
+    "这里",
+    "当地",
+    "该地区",
+    "上述地区",
+    "这个项目",
+    "本项目",
+    "该项目",
+    "这个建筑",
+    "该建筑",
+)
 
 FEEDBACK_REASON_CODES = {
     "answer_inaccurate",
@@ -216,6 +246,137 @@ def export_feedback(
     )
 
 
+def _require_feedback_dashboard_auth(authorization: str | None) -> None:
+    unauthorized = HTTPException(
+        status_code=401,
+        detail="用户名或密码错误",
+        headers={"WWW-Authenticate": 'Basic realm="Feedback Dashboard", charset="UTF-8"'},
+    )
+    if not authorization:
+        raise unauthorized
+    scheme, _, encoded = authorization.partition(" ")
+    if scheme.lower() != "basic" or not encoded:
+        raise unauthorized
+    try:
+        decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        raise unauthorized from None
+    username, separator, password = decoded.partition(":")
+    if not separator or not (
+        hmac.compare_digest(username, FEEDBACK_DASHBOARD_USERNAME)
+        and hmac.compare_digest(password, FEEDBACK_DASHBOARD_PASSWORD)
+    ):
+        raise unauthorized
+
+
+def _feedback_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _feedback_dashboard_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    shanghai = ZoneInfo("Asia/Shanghai")
+    now = datetime.now(shanghai)
+    helpful = sum(1 for row in rows if row.get("rating") == "helpful")
+    not_helpful = sum(1 for row in rows if row.get("rating") == "not_helpful")
+    total = helpful + not_helpful
+    reason_counts = Counter(
+        str(code)
+        for row in rows
+        for code in row.get("reason_codes", [])
+        if str(code).strip()
+    )
+    intent_counts = Counter(
+        str(row.get("intent") or "未记录")
+        for row in rows
+    )
+
+    trend: dict[str, dict[str, Any]] = {}
+    for offset in range(13, -1, -1):
+        day = (now - timedelta(days=offset)).date()
+        trend[day.isoformat()] = {
+            "date": day.strftime("%m-%d"),
+            "total": 0,
+            "helpful": 0,
+            "not_helpful": 0,
+        }
+    for row in rows:
+        created = _feedback_datetime(row.get("created_at"))
+        if created is None:
+            continue
+        day_key = created.astimezone(shanghai).date().isoformat()
+        if day_key not in trend:
+            continue
+        point = trend[day_key]
+        point["total"] += 1
+        rating = row.get("rating")
+        if rating in ("helpful", "not_helpful"):
+            point[rating] += 1
+
+    recent = []
+    for row in rows[:30]:
+        recent.append(
+            {
+                "id": str(row.get("id", "")),
+                "user_id": str(row.get("user_id", "")),
+                "rating": row.get("rating"),
+                "reason_codes": list(row.get("reason_codes", [])),
+                "comment": str(row.get("comment", "")),
+                "question": str(row.get("question_snapshot", "")),
+                "answer": str(row.get("answer_snapshot", "")),
+                "intent": str(row.get("intent", "")),
+                "intent_source": str(row.get("intent_source", "")),
+                "trace_id": str(row.get("trace_id", "")),
+                "kb_version": str(row.get("kb_version", "")),
+                "created_at": str(row.get("created_at", "")),
+                "updated_at": str(row.get("updated_at", "")),
+            }
+        )
+    return {
+        "generated_at": now.isoformat(),
+        "summary": {
+            "total": total,
+            "helpful": helpful,
+            "not_helpful": not_helpful,
+            "helpful_rate": round(helpful / total * 100, 1) if total else 0.0,
+            "users": len({str(row.get("user_id", "")).strip() for row in rows if row.get("user_id")}),
+        },
+        "trend": list(trend.values()),
+        "reasons": [
+            {"name": name, "count": count}
+            for name, count in reason_counts.most_common()
+        ],
+        "intents": [
+            {"name": name, "count": count}
+            for name, count in intent_counts.most_common(10)
+        ],
+        "recent": recent,
+    }
+
+
+@router.get(
+    "/admin/feedback/dashboard",
+    response_model=schemas.FeedbackDashboardResponse,
+)
+def feedback_dashboard(
+    response: Response,
+    authorization: str | None = Header(default=None),
+) -> schemas.FeedbackDashboardResponse:
+    _require_feedback_dashboard_auth(authorization)
+    response.headers["Cache-Control"] = "no-store"
+    return schemas.FeedbackDashboardResponse(
+        **_feedback_dashboard_payload(memory_store.list_feedback())
+    )
+
+
 @router.get("/knowledge/status", response_model=schemas.KnowledgeStatus)
 def knowledge_status() -> schemas.KnowledgeStatus:
     return schemas.KnowledgeStatus(**knowledge_base.stats())
@@ -298,6 +459,8 @@ def document_context(doc_id: str, query: str = "") -> schemas.DocumentContext:
 @router.get("/search", response_model=schemas.SearchResponse)
 def search_standards(q: str = "") -> schemas.SearchResponse:
     if not q.strip():
+        return schemas.SearchResponse(query=q, items=[])
+    if detect_outside_mainland_place(q):
         return schemas.SearchResponse(query=q, items=[])
     intent_result = intent_router.classify(q, use_llm=False)
     if intent_result.intent in {INTENT_CHITCHAT, INTENT_FALLBACK}:
@@ -505,7 +668,7 @@ def search_by_id(
     *,
     previous_query: str | None = None,
     memory_facts: list[dict[str, Any]] | None = None,
-    enable_web_search: bool = True,
+    enable_web_search: bool = False,
 ) -> dict[str, Any]:
     # TODO: 用正则提取规范编号，并精确匹配数据库中的条文。
     # 占位期间沿用原 Planner，避免影响现有问答；实现后替换为精确检索。
@@ -522,7 +685,7 @@ def search_by_name(
     *,
     previous_query: str | None = None,
     memory_facts: list[dict[str, Any]] | None = None,
-    enable_web_search: bool = True,
+    enable_web_search: bool = False,
 ) -> dict[str, Any]:
     # TODO: 使用 ES 模糊匹配规范名称，并返回候选规范列表。
     return planner.run(
@@ -539,7 +702,7 @@ def search_numeric(
     *,
     previous_query: str | None = None,
     memory_facts: list[dict[str, Any]] | None = None,
-    enable_web_search: bool = True,
+    enable_web_search: bool = False,
 ) -> dict[str, Any]:
     # TODO: 先走 RAG 检索指标条文，再用 LLM 提取数值并标注出处。
     return planner.run(
@@ -555,7 +718,7 @@ def search_scenario(
     *,
     previous_query: str | None = None,
     memory_facts: list[dict[str, Any]] | None = None,
-    enable_web_search: bool = True,
+    enable_web_search: bool = False,
 ) -> dict[str, Any]:
     # TODO: 走 RAG 多文档融合，汇总场景要求并生成答案。
     return planner.run(
@@ -571,7 +734,7 @@ def search_comparison(
     *,
     previous_query: str | None = None,
     memory_facts: list[dict[str, Any]] | None = None,
-    enable_web_search: bool = True,
+    enable_web_search: bool = False,
 ) -> dict[str, Any]:
     # TODO: 并行检索多个城市/规范，生成对比结果。
     return planner.run(
@@ -587,7 +750,7 @@ def search_colloquial(
     *,
     previous_query: str | None = None,
     memory_facts: list[dict[str, Any]] | None = None,
-    enable_web_search: bool = True,
+    enable_web_search: bool = False,
 ) -> dict[str, Any]:
     # TODO: 先调用 rewrite_vague_query() 改写，再走 RAG 检索。
     return planner.run(
@@ -615,17 +778,59 @@ def _is_standard_list_query(user_input: str) -> bool:
     )
 
 
+def _detect_query_outside_mainland(
+    user_input: str,
+    previous_query: str | None,
+    memory_facts: list[dict[str, Any]] | None,
+) -> str | None:
+    direct_match = detect_outside_mainland_place(user_input)
+    if direct_match:
+        return direct_match
+
+    uses_context = any(term in user_input for term in REGION_CONTEXT_TERMS)
+    if not uses_context:
+        return None
+    if previous_query:
+        previous_match = detect_outside_mainland_place(previous_query)
+        if previous_match:
+            return previous_match
+    for fact in memory_facts or []:
+        memory_match = detect_outside_mainland_place(str(fact.get("text", "")))
+        if memory_match:
+            return memory_match
+    return None
+
+
+def _attach_mainland_scope_intent(result: dict[str, Any]) -> dict[str, Any]:
+    result["intent"] = OUTSIDE_MAINLAND_INTENT
+    result["intent_label"] = OUTSIDE_MAINLAND_LABEL
+    result["intent_source"] = "rules"
+    result["intent_confidence"] = 0.99
+    result["intent_alias"] = OUTSIDE_MAINLAND_INTENT
+    return result
+
+
 def handle_query(
     user_input: str,
     user_id: str,
     *,
     previous_query: str | None = None,
     memory_facts: list[dict[str, Any]] | None = None,
-    enable_web_search: bool = True,
+    enable_web_search: bool = False,
 ) -> dict[str, Any]:
+    outside_place = _detect_query_outside_mainland(
+        user_input,
+        previous_query,
+        memory_facts,
+    )
+    if outside_place:
+        return _attach_mainland_scope_intent(
+            outside_mainland_result(user_input, outside_place)
+        )
+
     intent_result = None
     try:
-        intent_result = intent_router.route(user_input)
+        intent_result = intent_router.route(user_input, use_llm=False)
         if _is_standard_list_query(user_input):
             return _attach_intent(
                 search_by_name(
@@ -710,13 +915,9 @@ def handle_query(
         if alias == "fallback":
             return _attach_intent(
                 _intent_result(
-                    (
-                        "这个问题不在工程建设规范知识库范围内。"
-                        "我目前可以帮你查询建筑、结构、消防、施工、材料等工程规范，"
-                        "你可以换个相关问题试试。"
-                    ),
-                    "暂未覆盖",
-                    "问题超出规范知识库范围，不触发规范检索",
+                    OUT_OF_SCOPE_REPLY,
+                    "拒绝无关问题",
+                    "问题与工程建设规范无关，不触发规范检索或内容生成",
                     user_input,
                 ),
                 intent_result,
@@ -765,9 +966,13 @@ def chat(
         user_id,
         previous_query=previous_query,
         memory_facts=memory["facts"],
-        enable_web_search=not payload.disable_web_search,
+        enable_web_search=WEB_SEARCH_ENABLED and not payload.disable_web_search,
     )
-    non_retrieval = result.get("intent") in {INTENT_CHITCHAT, INTENT_FALLBACK}
+    non_retrieval = result.get("intent") in {
+        INTENT_CHITCHAT,
+        INTENT_FALLBACK,
+        OUTSIDE_MAINLAND_INTENT,
+    }
     if non_retrieval:
         keywords = []
         recommendations = []

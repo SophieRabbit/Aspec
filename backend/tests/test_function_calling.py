@@ -24,6 +24,7 @@ class FakeLLM:
     ) -> None:
         self.calls = 0
         self.messages: list[dict] = []
+        self.tool_batches: list[list[str]] = []
         self.raise_on_chat = raise_on_chat
         self.first_tool_name = first_tool_name
         self.first_tool_args = first_tool_args or {"query": "住宅楼梯踏步宽度"}
@@ -31,6 +32,12 @@ class FakeLLM:
     def chat(self, messages: list[dict], tools=None, *, tool_choice="auto") -> dict:
         self.messages = messages
         self.calls += 1
+        self.tool_batches.append(
+            [
+                str(tool.get("function", {}).get("name", ""))
+                for tool in (tools or [])
+            ]
+        )
         if self.raise_on_chat:
             raise RuntimeError("mock llm failure")
         if self.calls == 1:
@@ -67,6 +74,9 @@ def test_function_calling_executes_tool_and_returns_final_answer() -> None:
     assert result["follow_ups"]
     assert any(message["role"] == "assistant" and message.get("tool_calls") for message in llm.messages)
     assert any(message["role"] == "tool" for message in llm.messages)
+    assert llm.calls == 2
+    assert "web_search" not in llm.tool_batches[0]
+    assert llm.tool_batches[1] == []
 
 
 def test_function_calling_falls_back_to_rule_planner_on_error() -> None:
@@ -81,6 +91,20 @@ def test_function_calling_falls_back_to_rule_planner_on_error() -> None:
 
     assert "暂未收录" in result["reply"]
     assert result["steps"]
+
+
+def test_function_calling_exposes_web_search_only_when_explicitly_enabled() -> None:
+    retriever = FakeRetriever()
+    llm = FakeLLM()
+    planner = Planner(retriever, llm_client=llm)
+
+    planner.run(
+        "住宅楼梯踏步宽度和高度有什么要求？",
+        enable_function_calling=True,
+        enable_web_search=True,
+    )
+
+    assert "web_search" in llm.tool_batches[0]
 
 
 def test_function_calling_dispatches_calculation_tool() -> None:

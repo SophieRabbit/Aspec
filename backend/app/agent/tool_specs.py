@@ -100,7 +100,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "当本地知识库没有足够依据时，联网搜索公开网页资料作为参考。",
+            "description": (
+                "仅在用户明确允许联网且本地知识库确实没有足够依据时，"
+                "联网搜索公开网页资料作为参考。默认不要调用。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

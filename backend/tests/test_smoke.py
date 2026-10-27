@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.api import routes as api_routes
 from app.main import app
+from app.schemas import ChatRequest
 
 
 client = TestClient(app)
@@ -13,6 +14,11 @@ def test_health() -> None:
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_web_search_is_disabled_by_default() -> None:
+    request = ChatRequest(message="住宅楼梯踏步宽度有什么要求？")
+    assert request.disable_web_search is True
 
 
 def test_knowledge_status() -> None:
@@ -65,6 +71,67 @@ def test_uncovered_question_does_not_offer_human_support() -> None:
     assert payload["sources"] == []
     assert "人工" not in payload["reply"]
     assert "工程建设规范" in payload["reply"]
+
+
+def test_zodiac_question_is_directly_refused_without_zodiac_content() -> None:
+    response = client.post(
+        "/api/chat",
+        json={"message": "你还知道生肖吗"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "fallback"
+    assert payload["intent_label"] == "未覆盖问题"
+    assert payload["sources"] == []
+    assert payload["follow_ups"] == []
+    assert payload["reply"] == api_routes.OUT_OF_SCOPE_REPLY
+    for unrelated_content in ("十二生肖", "属相", "鼠", "牛", "虎", "兔"):
+        assert unrelated_content not in payload["reply"]
+
+
+def test_hong_kong_request_returns_mainland_scope_notice_without_retrieval(
+    monkeypatch,
+) -> None:
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("knowledge retrieval must not run outside mainland China")
+
+    monkeypatch.setattr(api_routes.planner, "run", fail_if_called)
+    monkeypatch.setattr(api_routes.planner, "format_search_list", fail_if_called)
+
+    response = client.post(
+        "/api/chat",
+        json={"message": "给我找找香港的踏步规范"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "outside_region"
+    assert payload["intent_label"] == "中国大陆以外"
+    assert payload["sources"] == []
+    assert payload["recommendations"] == []
+    assert payload["keywords"] == []
+    assert payload["web_results"] == []
+    assert payload["follow_ups"] == []
+    assert "仅限中国大陆地区" in payload["reply"]
+    assert "香港不属于该范围" in payload["reply"]
+    assert "未检索知识库" in payload["reply"]
+    assert "GB55031" not in payload["reply"]
+
+    search = client.get("/api/search", params={"q": "香港的踏步规范"})
+    assert search.status_code == 200
+    assert search.json()["items"] == []
+
+
+def test_tokyo_request_returns_mainland_scope_notice() -> None:
+    response = client.post(
+        "/api/chat",
+        json={"message": "帮我查查东京的建筑规范"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "outside_region"
+    assert payload["sources"] == []
+    assert payload["recommendations"] == []
+    assert "东京不属于该范围" in payload["reply"]
 
 
 def test_feedback_round_trip_and_update() -> None:

@@ -15,6 +15,10 @@ from ..config import (
     STANDARD_STATUS_PATH,
 )
 from ..knowledge.keywords import extract_keywords
+from ..knowledge.mainland_scope import (
+    detect_outside_mainland_place,
+    outside_mainland_result,
+)
 from ..knowledge.retriever import (
     REQUIRED_DOMAIN_TERMS,
     Retriever,
@@ -40,7 +44,13 @@ from .intent_router import (
 )
 from .llm import FunctionCallingClient
 from .tool_specs import TOOL_DEFINITIONS, TOOL_LABELS
-from .tools import calculate_tool, compare_regional_tool, compare_tool, retrieve_tool
+from .tools import (
+    calculate_tool,
+    compare_regional_tool,
+    compare_tool,
+    normalize_comparison_query,
+    retrieve_tool,
+)
 from services.compound_intent import detect_compound_intent
 from services.local_dependency import detect_local_dependency
 from services.synonym_expander import expand_query_details
@@ -143,9 +153,12 @@ class Planner:
         query: str,
         previous_query: str | None = None,
         memory_facts: list[dict[str, Any]] | None = None,
-        enable_web_search: bool = True,
+        enable_web_search: bool = False,
         enable_function_calling: bool = AGENT_FUNCTION_CALLING_ENABLED,
     ) -> dict[str, Any]:
+        outside_place = detect_outside_mainland_place(query)
+        if outside_place:
+            return outside_mainland_result(query, outside_place)
         if enable_function_calling and self.llm_client.enabled:
             try:
                 result = self._run_function_calling(
@@ -241,7 +254,7 @@ class Planner:
         query: str,
         previous_query: str | None = None,
         memory_facts: list[dict[str, Any]] | None = None,
-        enable_web_search: bool = True,
+        enable_web_search: bool = False,
     ) -> dict[str, Any]:
         steps: list[dict[str, Any]] = []
         sources: list[dict[str, Any]] = []
@@ -268,6 +281,7 @@ class Planner:
         if uses_memory:
             effective_query = f"{effective_query}，项目背景：{memory_hint}"
         constraint_query = self._constraint_query(query, previous_query)
+        comparison_query = normalize_comparison_query(effective_query)
 
         regions = extract_regions(effective_query, self.retriever.knowledge_base.documents)
         if len(regions) >= 2 and any(term in effective_query for term in COMPARISON_TERMS):
@@ -327,11 +341,11 @@ class Planner:
                 "memory_used": uses_memory,
             }
 
-        for tool, title, detail in self.plan(effective_query):
+        for tool, title, detail in self.plan(comparison_query):
             started = time.perf_counter()
             if tool == "retrieve":
                 sources = retrieve_tool(
-                    effective_query,
+                    comparison_query,
                     self.retriever,
                     top_k=500,
                     requested_region=requested_region,
@@ -357,7 +371,7 @@ class Planner:
                 )
             elif tool == "compare":
                 comparison = compare_tool(
-                    effective_query,
+                    comparison_query,
                     self.retriever,
                     requested_region=requested_region,
                 )
@@ -371,6 +385,21 @@ class Planner:
                     "duration_ms": elapsed_ms,
                 }
             )
+
+        if comparison and comparison.get("standards"):
+            compared_standards = {
+                str(standard).replace(" ", "")
+                for standard in comparison["standards"]
+                if str(standard).strip()
+            }
+            selected_sources = [
+                source
+                for source in sources
+                if str(source.get("standard", "")).replace(" ", "")
+                in compared_standards
+            ]
+            if selected_sources:
+                sources = selected_sources
 
         if not sources and enable_web_search:
             web_results = web_search(self._build_web_query(effective_query, requested_region))
@@ -393,7 +422,7 @@ class Planner:
             constraint_query,
             reply,
             requested_region=requested_region,
-            llm_client=self.llm_client,
+            llm_client=None,
         )
         follow_ups = self._suggest_follow_ups(effective_query, sources)
         return {
@@ -452,9 +481,15 @@ class Planner:
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
-                "content": f"{self._agent_system_prompt()}\n\n{context}",
+                "content": f"{self._agent_system_prompt(enable_web_search)}\n\n{context}",
             },
             {"role": "user", "content": query},
+        ]
+        tools = [
+            tool
+            for tool in TOOL_DEFINITIONS
+            if enable_web_search
+            or tool.get("function", {}).get("name") != "web_search"
         ]
         steps: list[dict[str, Any]] = []
         sources: list[dict[str, Any]] = []
@@ -463,8 +498,25 @@ class Planner:
         web_results: list[dict[str, Any]] = []
         final_reply = ""
 
-        for iteration in range(AGENT_MAX_TOOL_TURNS):
-            message = self.llm_client.chat(messages, TOOL_DEFINITIONS)
+        max_turns = max(1, AGENT_MAX_TOOL_TURNS)
+        for iteration in range(max_turns):
+            is_final_turn = iteration == max_turns - 1
+            if is_final_turn:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "请基于以上工具结果直接给出最终答案，不要再调用工具。",
+                    }
+                )
+                final_message = self.llm_client.chat(
+                    messages,
+                    None,
+                    tool_choice="none",
+                )
+                final_reply = final_message.get("content") or ""
+                break
+
+            message = self.llm_client.chat(messages, tools)
             tool_calls = message.get("tool_calls") or []
             if not tool_calls:
                 final_reply = message.get("content") or ""
@@ -508,24 +560,6 @@ class Planner:
                     }
                 )
 
-            if iteration == AGENT_MAX_TOOL_TURNS - 1:
-                try:
-                    final_message = self.llm_client.chat(
-                        [
-                            *messages,
-                            {
-                                "role": "user",
-                                "content": "请基于以上工具结果直接给出最终答案，不要再调用工具。",
-                            },
-                        ],
-                        TOOL_DEFINITIONS,
-                        tool_choice="none",
-                    )
-                    final_reply = final_message.get("content") or ""
-                except Exception as exc:
-                    logger.warning("final function calling step failed, composing answer locally: %s", exc)
-                break
-
         if not final_reply.strip():
             region_notice = build_region_notice(requested_region, documents)
             final_reply = self._compose_answer(
@@ -541,7 +575,7 @@ class Planner:
             constraint_query,
             final_reply,
             requested_region=requested_region,
-            llm_client=self.llm_client,
+            llm_client=None,
         )
         follow_ups = self._suggest_follow_ups(effective_query, sources)
         return {
@@ -929,12 +963,20 @@ class Planner:
         return "\n".join(lines)
 
     @staticmethod
-    def _agent_system_prompt() -> str:
+    def _agent_system_prompt(enable_web_search: bool = False) -> str:
+        web_policy = (
+            "只有用户明确允许联网且本地知识库依据不足时，才可以调用一次 web_search；"
+            "能用本地知识库回答时必须使用本地结果。"
+            if enable_web_search
+            else "当前禁止联网搜索，不得调用 web_search；仅使用本地知识库和本地工具。"
+        )
         return (
-            "你是工程规范智能问答助手。你可以调用工具获取规范条文、数值计算、"
-            "规范对比和联网资料。请根据用户问题自主决定调用哪些工具。"
+            "你是工程规范智能问答助手。优先使用本地工具获取规范条文、完成数值计算和规范对比。"
+            "服务范围仅限工程建设规范及其直接相关的设计、施工、验收和技术问题。"
+            "遇到生肖、星座、命理、娱乐、生活常识等与工程建设规范无关的问题，"
+            "必须直接、简短地拒绝回答，不得介绍或解释无关内容，也不得调用任何工具。"
+            f"{web_policy}"
             "当用户问题指代“这条、上述、这个项目”等时，应结合会话背景补全后再调用检索工具。"
-            "只有本地知识库依据不足时才调用 web_search。"
             "回答必须基于工具返回的结果，引用标准编号、章节、条文和页码，不得编造条文。"
             "如果工具结果为空，如实说明并建议补充资料。请使用中文给出简洁专业的最终答案。"
         )

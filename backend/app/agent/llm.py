@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from ..config import (
+    AGENT_LLM_MAX_TOKENS,
     AGENT_LLM_TIMEOUT_SECONDS,
     LLM_API_BASE,
     LLM_API_KEY,
@@ -25,11 +26,13 @@ class FunctionCallingClient:
         api_key: str = LLM_API_KEY,
         model: str = LLM_MODEL,
         timeout_seconds: float = AGENT_LLM_TIMEOUT_SECONDS,
+        max_output_tokens: int = AGENT_LLM_MAX_TOKENS,
     ) -> None:
         self.api_base = api_base
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.max_output_tokens = max_output_tokens
 
     @property
     def enabled(self) -> bool:
@@ -57,6 +60,7 @@ class FunctionCallingClient:
             "messages": messages,
             "temperature": 0,
             "tool_choice": tool_choice,
+            "max_tokens": self.max_output_tokens,
         }
         if tools:
             payload["tools"] = tools

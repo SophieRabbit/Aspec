@@ -149,6 +149,11 @@ _CHITCHAT_ONLY = re.compile(
     re.IGNORECASE,
 )
 
+_EXPLICIT_OUT_OF_SCOPE = re.compile(
+    r"(?:生肖|属相|星座|占星|星座运势|塔罗|算命|八字|求签|解梦)",
+    re.IGNORECASE,
+)
+
 _RULE_PATTERNS: list[tuple[str, list[str], float]] = [
     (
         INTENT_NUMBER,
@@ -229,6 +234,7 @@ _RULE_PATTERNS: list[tuple[str, list[str], float]] = [
     (
         INTENT_FALLBACK,
         [
+            _EXPLICIT_OUT_OF_SCOPE.pattern,
             r"(?:画图|设计图|图纸|帮我画|给个图|作图|出图|效果图)",
             r"(?:你们公司|贵公司|你是谁|你叫什么|人工|客服|投诉|电话|联系方式|怎么联系)",
             r"(?:帮我|请帮我).{0,6}(?:写|做|画|设计|制作).{0,10}(?:方案|图|报告|PPT|表格|代码)",
