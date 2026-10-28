@@ -257,7 +257,22 @@ def test_garage_ramp_two_lane_width_keeps_specific_terms() -> None:
     )
     assert detail is not None
     assert detail["matched"] is False
-    assert detail["snippets"] == []
+    assert detail["snippets"]
+    assert all("双车道" not in item["text"] for item in detail["snippets"])
+
+
+def test_sichuan_residential_standard_detail_falls_back_to_body_text() -> None:
+    planner = Planner(Retriever(KnowledgeBase()))
+
+    detail = planner.format_spec_detail(
+        "\u56db\u5ddd\u7701-dbj51-168-2021",
+        "\u56db\u5ddd\u7701\u4f4f\u5b85\u8bbe\u8ba1\u89c4\u8303",
+    )
+
+    assert detail is not None
+    assert detail["matched"] is False
+    assert detail["snippets"]
+    assert any("1.0.2" in item["text"] for item in detail["snippets"])
 
 
 def test_residential_spacing_query_requires_spacing_context() -> None:

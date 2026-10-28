@@ -60,6 +60,41 @@ def test_sql_store_persists_raw_messages_and_memory_items(tmp_path: Path) -> Non
     assert store.list_memory_items("user-a")[0]["text"] == "项目地点：昆山市"
 
 
+def test_feedback_confidence_is_bounded_for_postgres_varchar(tmp_path: Path) -> None:
+    store = SqlMemoryStore(f"sqlite:///{tmp_path / 'feedback.db'}")
+    conversation = store.create_conversation(user_id="user-a")
+    store.add_message(
+        conversation_id=conversation["conversation_id"],
+        user_id="user-a",
+        role="assistant",
+        content="测试回答",
+        trace_id="trace-a",
+    )
+    message = store.get_messages(conversation["conversation_id"], "user-a")[0]
+
+    feedback = store.upsert_feedback(
+        user_id="user-a",
+        conversation_id=conversation["conversation_id"],
+        message_id=str(message["id"]),
+        trace_id="trace-a",
+        rating="not_helpful",
+        reason_codes=["answer_inaccurate"],
+        comment="测试",
+        source_doc_id="",
+        source_article="",
+        intent="standard_name",
+        intent_source="rules",
+        intent_confidence=0.9781234567890123,
+        question_snapshot="测试问题",
+        answer_snapshot="测试回答",
+        kb_version="kb@1",
+        app_version="test",
+    )
+
+    assert store.feedback.c.intent_confidence.type.length == 64
+    assert feedback["intent_confidence"] == "0.978123"
+
+
 def test_memory_store_builds_context_after_distillation(tmp_path: Path) -> None:
     store = MemoryStore(
         database_url=f"sqlite:///{tmp_path / 'memory.db'}",

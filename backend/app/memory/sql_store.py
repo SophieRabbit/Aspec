@@ -18,7 +18,9 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    inspect,
     select,
+    text,
 )
 from sqlalchemy.pool import StaticPool
 
@@ -143,7 +145,7 @@ class SqlMemoryStore:
             Column("source_article", String(64), nullable=False, default=""),
             Column("intent", String(32), nullable=False, default=""),
             Column("intent_source", String(32), nullable=False, default=""),
-            Column("intent_confidence", String(16), nullable=False, default="0"),
+            Column("intent_confidence", String(64), nullable=False, default="0"),
             Column("question_snapshot", Text, nullable=False, default=""),
             Column("answer_snapshot", Text, nullable=False, default=""),
             Column("kb_version", String(64), nullable=False, default=""),
@@ -177,6 +179,44 @@ class SqlMemoryStore:
 
     def init_schema(self) -> None:
         self.metadata.create_all(self.engine)
+        self._ensure_feedback_schema()
+
+    def _ensure_feedback_schema(self) -> None:
+        """Widen legacy confidence columns that predate VARCHAR(64)."""
+        inspector = inspect(self.engine)
+        if "feedback" not in inspector.get_table_names():
+            return
+        column = next(
+            (
+                item
+                for item in inspector.get_columns("feedback")
+                if item["name"] == "intent_confidence"
+            ),
+            None,
+        )
+        current_length = getattr(column.get("type"), "length", None) if column else None
+        if not current_length or int(current_length) >= 64:
+            return
+        dialect = self.engine.dialect.name
+        statements = {
+            "postgresql": (
+                "ALTER TABLE feedback "
+                "ALTER COLUMN intent_confidence TYPE VARCHAR(64)"
+            ),
+            "mysql": (
+                "ALTER TABLE feedback "
+                "MODIFY COLUMN intent_confidence VARCHAR(64) NOT NULL"
+            ),
+        }
+        statement = statements.get(dialect)
+        if not statement:
+            return
+        try:
+            with self.engine.begin() as connection:
+                connection.execute(text(statement))
+            logger.info("widened feedback.intent_confidence for %s", dialect)
+        except Exception as exc:
+            logger.warning("could not widen feedback.intent_confidence: %s", exc)
 
     def close(self) -> None:
         self.engine.dispose()
@@ -472,7 +512,7 @@ class SqlMemoryStore:
             "source_article": source_article.strip()[:64],
             "intent": intent[:32],
             "intent_source": intent_source[:32],
-            "intent_confidence": str(intent_confidence),
+            "intent_confidence": f"{float(intent_confidence):.6f}",
             "question_snapshot": question_snapshot[:4000],
             "answer_snapshot": answer_snapshot[:4000],
             "kb_version": kb_version[:64],

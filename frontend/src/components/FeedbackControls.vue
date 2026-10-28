@@ -8,6 +8,7 @@ const props = defineProps({
   message: { type: Object, required: true },
 })
 
+const MAX_COMMENT_LENGTH = 1000
 const reasonOptions = [
   { code: 'answer_inaccurate', label: '答案不准确' },
   { code: 'source_mismatch', label: '来源不匹配' },
@@ -31,6 +32,9 @@ const submittedText = computed(() => {
   if (!submitted.value) return ''
   return submitted.value.rating === 'helpful' ? '已反馈：有帮助' : '已反馈：没帮助'
 })
+
+const commentRemaining = computed(() => MAX_COMMENT_LENGTH - comment.value.length)
+const commentNearLimit = computed(() => commentRemaining.value <= 100)
 
 watch(
   () => props.message.feedback,
@@ -68,6 +72,10 @@ function cancelFeedback() {
 
 async function submitFeedback(rating) {
   if (submitting.value) return
+  if (comment.value.length > MAX_COMMENT_LENGTH) {
+    error.value = `补充说明最多 ${MAX_COMMENT_LENGTH} 字，请精简后再提交`
+    return
+  }
   if (
     rating === 'not_helpful' &&
     !selectedReasons.value.length &&
@@ -179,12 +187,22 @@ async function submitFeedback(rating) {
       <textarea
         v-model="comment"
         class="feedback-comment"
-        maxlength="1000"
+        :maxlength="MAX_COMMENT_LENGTH"
         rows="3"
         placeholder="可以补充具体问题，例如希望增加的地方标准或正确条款（选填）"
       ></textarea>
       <div class="feedback-form-footer">
         <span class="feedback-privacy-note">反馈仅用于改进规范检索</span>
+        <span
+          class="feedback-character-count"
+          :class="{ 'near-limit': commentNearLimit }"
+        >
+          {{ comment.length }} / {{ MAX_COMMENT_LENGTH }}
+          <template v-if="commentNearLimit && commentRemaining > 0">
+            · 还可输入 {{ commentRemaining }} 字
+          </template>
+          <template v-else-if="commentRemaining <= 0">· 已达上限</template>
+        </span>
         <div class="feedback-form-actions">
           <button
             class="feedback-cancel-button"

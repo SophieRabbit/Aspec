@@ -1809,45 +1809,8 @@ class Planner:
                 "matched": bool(concept_snippets),
                 "snippets": concept_snippets[:30],
             }
-        if query.strip():
-            return build_detail([], matched=False)
-        units = self._build_clause_units(document.get("snippets", []))
-        snippets: list[dict[str, Any]] = []
-        for unit in units:
-            parts = unit.get("parts", [])
-            assembled = "\n".join(str(part[2]).rstrip() for part in parts)
-            text = self._normalize_ocr_layout(assembled)
-            if not text.strip():
-                continue
-            if self._looks_like_standard_index(text):
-                continue
-            if terms and not any(term in text for term in terms):
-                continue
-            if terms and not any(
-                self._term_outside_parentheses(text, term) for term in terms
-            ):
-                continue
-            article_match = re.match(r"\s*(\d{1,2}(?:\.\d{1,2}){1,2})", text)
-            article = article_match.group(1) if article_match else ""
-            display_part = parts[0]
-            if terms:
-                for part in parts:
-                    if any(term in part[2] for term in terms):
-                        display_part = part
-                        break
-            score = sum(text.count(term) for term in terms)
-            snippets.append(
-                {
-                    "chapter": "",
-                    "article": article,
-                    "page": display_part[0],
-                    "book_page": display_part[1],
-                    "text": self._highlight_clause_html(text, terms),
-                    "score": score,
-                }
-            )
-        matched = bool(snippets)
-        if not matched:
+        def representative_snippets() -> list[dict[str, Any]]:
+            snippets: list[dict[str, Any]] = []
             noise = (
                 "UDC",
                 "中华人民共和国",
@@ -1862,44 +1825,45 @@ class Planner:
                 "印刷",
                 "www.",
             )
-            for unit in units:
+            for unit in self._build_clause_units(document.get("snippets", [])):
                 parts = unit.get("parts", [])
-                text = "".join(part[2] for part in parts)
-                if len(text) < 30:
+                if not parts:
                     continue
-                if self._looks_like_standard_index(text):
+                text = self._normalize_ocr_layout(
+                    "\n".join(str(part[2]).rstrip() for part in parts)
+                )
+                if len(text) < 30 or self._looks_like_standard_index(text):
                     continue
-                if any(token in text[:60] for token in noise):
+                if any(token in text[:300] for token in noise):
                     continue
+                article_match = re.match(
+                    r"\s*(\d{1,2}(?:\.\d{1,2}){1,2})",
+                    text,
+                )
                 snippets.append(
                     {
-                        "chapter": "",
-                        "article": "",
+                        "chapter": parts[0][0].get("chapter", "")
+                        if isinstance(parts[0][0], dict)
+                        else "",
+                        "article": article_match.group(1) if article_match else "",
                         "page": parts[0][0],
                         "book_page": parts[0][1],
                         "text": self._highlight_html(text, []),
                         "score": 0,
                     }
                 )
-                if len(snippets) >= 12:
+                if len(snippets) >= 30:
                     break
-        snippets.sort(
-            key=lambda item: (-item["score"], item.get("page") or 0)
-        )
-        standard = document.get("standard", "")
-        return {
-            "doc_id": doc_id,
-            "standard": standard,
-            "title": document.get("title", ""),
-            "document_type": document.get("document_type", "规范"),
-            "region": document.get("region", "全国"),
-            "status": self._source_status({"standard": standard, "doc_id": doc_id}),
-            "effective_date": self._standard_effective_date(standard),
-            "priority": document.get("priority", 0),
-            "tier": document.get("tier", ""),
-            "matched": matched,
-            "snippets": snippets[:30],
-        }
+            snippets.sort(
+                key=lambda item: (
+                    not bool(item.get("article")),
+                    int(item.get("page") or 0),
+                )
+            )
+            return snippets
+
+        snippets = representative_snippets()
+        return build_detail(snippets, matched=False if query.strip() else bool(snippets))
 
     @staticmethod
     def _looks_like_standard_index(text: str) -> bool:
