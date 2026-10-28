@@ -60,6 +60,41 @@ COMMON_STANDARD_TERMS = (
     "建筑",
 )
 
+QUERY_EXPANSION_KNOWN_TOPICS = (
+    "住宅",
+    "公共建筑",
+    "商业建筑",
+    "办公建筑",
+    "工业建筑",
+    "楼梯",
+    "踏步",
+    "电梯",
+    "消防电梯",
+    "防火分区",
+    "防火间距",
+    "消防车道",
+    "消防登高面",
+    "消防救援场地",
+    "安全出口",
+    "疏散",
+    "防水",
+    "无障碍",
+    "日照",
+    "采光",
+    "层高",
+    "净高",
+    "容积率",
+    "建筑密度",
+    "门窗",
+    "栏杆",
+    "坡道",
+    "人防",
+    "幕墙",
+    "保温",
+    "灭火器",
+    "消火栓",
+)
+
 HIGH_IMPORTANCE_TERMS = (
     "民用建筑",
     "住宅",
@@ -397,6 +432,7 @@ class Retriever:
     def __init__(self, knowledge_base: Any) -> None:
         self.knowledge_base = knowledge_base
         self.llm_client: Any | None = None
+        self.query_expander: Any | None = None
         self.snippets: list[dict[str, Any]] = []
         self.priority_codes: set[str] = set()
         self.priority_items: dict[str, dict[str, Any]] = {}
@@ -486,18 +522,82 @@ class Retriever:
         region_scope: dict[str, Any] | None = None,
         expand_synonyms: bool = True,
     ) -> list[dict[str, Any]]:
+        local_expansion = expand_query_details(query)
         if expand_synonyms:
-            expansion = expand_query_details(query)
-            if expansion.matches:
+            if local_expansion.matches:
                 return self._search_with_synonym_expansion(
                     query,
-                    expansion,
+                    local_expansion,
                     top_k=top_k,
                     region=region,
                     document_type=document_type,
                     standard=standard,
                     region_scope=region_scope,
                 )
+            if self.query_expander is not None and self._should_expand_query(query):
+                expanded = self.query_expander.expand(query)
+                if expanded is not None and expanded.terms:
+                    expanded_results = self.search(
+                        " ".join((query, *expanded.terms)),
+                        top_k=max(30, top_k * 4),
+                        region=region,
+                        document_type=document_type,
+                        standard=standard,
+                        region_scope=region_scope,
+                        expand_synonyms=False,
+                    )
+                    concept_matches = [
+                        item
+                        for item in expanded_results
+                        if any(
+                            term in str(item.get("text", ""))
+                            or term in str(item.get("document", {}).get("title", ""))
+                            for term in expanded.terms
+                        )
+                    ]
+                    if concept_matches:
+                        def expansion_rank(item: dict[str, Any]) -> tuple[int, int, int, int, float]:
+                            text = str(item.get("text", ""))
+                            canonical_position = (
+                                text.find(expanded.canonical_topic)
+                                if expanded.canonical_topic
+                                else -1
+                            )
+                            canonical_window = (
+                                text[
+                                    max(0, canonical_position - 80) :
+                                    canonical_position + 600
+                                ]
+                                if canonical_position >= 0
+                                else ""
+                            )
+                            nearby_attributes = sum(
+                                int(term in canonical_window)
+                                for term in expanded.attributes
+                            )
+                            heading_hit = int(
+                                bool(expanded.canonical_topic)
+                                and (
+                                    f"{expanded.canonical_topic}应符合" in text
+                                    or f"{expanded.canonical_topic}应至少" in text
+                                )
+                            )
+                            return (
+                                heading_hit,
+                                nearby_attributes,
+                                int(canonical_position >= 0),
+                                sum(
+                                    int(term in text)
+                                    for term in expanded.attributes
+                                ),
+                                float(item.get("score", 0.0)),
+                            )
+
+                        concept_matches.sort(
+                            key=expansion_rank,
+                            reverse=True,
+                        )
+                        return concept_matches[:top_k]
         compound_intent = detect_compound_intent(query, self.llm_client)
         if compound_intent.is_compound:
             compound_results = self._search_compound(
@@ -814,6 +914,12 @@ class Retriever:
             if match.concept_id == "roof_garden"
             for term in match.synonyms
         )
+        fire_access_terms = tuple(
+            term
+            for match in expansion.matches
+            if match.concept_id == "fire_access_platform"
+            for term in match.synonyms
+        )
         ranked: list[dict[str, Any]] = []
         for item in merged.values():
             document = item["document"]
@@ -841,6 +947,43 @@ class Retriever:
                 term in text for term in ("住宅", "居住建筑")
             ):
                 score += 250.0
+            fire_access_specific = 0
+            if fire_access_terms and any(term in text for term in fire_access_terms):
+                fire_access_specific += 1
+                score += 300.0
+                if "消防车登高操作场地应符合下列规定" in text:
+                    fire_access_specific += 3
+                    score += 500.0
+                if "长度和宽度" in text or "尺寸" in text:
+                    fire_access_specific += 2
+                    score += 250.0
+                if "距离建筑外墙" in text:
+                    fire_access_specific += 2
+                    score += 300.0
+                if "场地坡度" in text or "场的坡度" in text:
+                    fire_access_specific += 1
+                    score += 100.0
+                clause_positions = [
+                    text.find(clause)
+                    for clause in ("3.4.6", "3.4.7")
+                    if text.find(clause) >= 0
+                ]
+                if clause_positions and fire_access_specific >= 2:
+                    start = max(0, min(clause_positions) - 20)
+                    excerpt = text[start : start + 1600]
+                    specific_snippet = dict(item["snippet"])
+                    specific_snippet["text"] = excerpt
+                    if "3.4.6" in excerpt and "3.4.7" in excerpt:
+                        specific_snippet["article"] = "3.4.6-3.4.7"
+                    else:
+                        specific_snippet["article"] = (
+                            "3.4.6" if "3.4.6" in excerpt else "3.4.7"
+                        )
+                    item = {
+                        **item,
+                        "text": excerpt,
+                        "snippet": specific_snippet,
+                    }
             title = str(document.get("title", ""))
             if any(
                 marker in title
@@ -849,12 +992,14 @@ class Retriever:
                 score -= 200.0
             item["score"] = score
             item["_concept_hits"] = concept_hits
+            item["_fire_access_specific"] = fire_access_specific
             item["_paired_hit"] = int(paired_hit)
             item["_related_standard_hit"] = int(bool(code and code in related_codes))
             ranked.append(item)
 
         ranked.sort(
             key=lambda item: (
+                item.get("_fire_access_specific", 0),
                 item.get("_paired_hit", 0),
                 item.get("_related_standard_hit", 0),
                 item.get("_concept_hits", 0),
@@ -872,6 +1017,14 @@ class Retriever:
             ]
             if roof_matches:
                 ranked = roof_matches
+        elif fire_access_terms:
+            fire_access_matches = [
+                item
+                for item in ranked
+                if item.get("_fire_access_specific", 0) >= 2
+            ]
+            if fire_access_matches:
+                ranked = fire_access_matches
         else:
             concept_matches = [
                 item
@@ -901,6 +1054,23 @@ class Retriever:
                 ordered.append(related[index])
         ordered.extend(remaining)
         return ordered[:top_k]
+
+    def _should_expand_query(self, query: str) -> bool:
+        text = query.strip()
+        if len(text) < 4:
+            return False
+        if re.search(
+            r"(?i)(?:GB|GB/T|JGJ|CJJ|DB|T/)\s*\d{1,6}",
+            text,
+        ):
+            return False
+        if any(topic in text for topic in QUERY_EXPANSION_KNOWN_TOPICS):
+            return False
+        return not any(
+            document.get("title", "") in text
+            for document in self.knowledge_base.documents
+            if document.get("title")
+        )
 
     def _search_compound(
         self,

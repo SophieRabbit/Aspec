@@ -56,9 +56,9 @@ router = APIRouter(prefix="/api")
 
 knowledge_base = KnowledgeBase()
 retriever = Retriever(knowledge_base)
-planner = Planner(retriever)
-intent_router = IntentRouter(llm_client=planner.llm_client)
 memory_store = MemoryStore()
+planner = Planner(retriever, query_expansion_cache=memory_store)
+intent_router = IntentRouter(llm_client=planner.llm_client)
 catalog = Catalog()
 
 INTENT_ALIASES = {

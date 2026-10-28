@@ -52,6 +52,19 @@ AGENT_LLM_MAX_TOKENS=1200
 不再根据线上是否配置 LLM 而切换 Function Calling 或建筑类型识别链路。这样可以保证同一个
 问题在本地与线上返回相同的结构、规范和依据。
 
+未知俗称为检索漏召回的主要来源。系统增加了一个受限的 LLM 查询扩展层，只在本地词库未命中
+主题时调用，不负责生成答案，也不会接收知识库全文：
+
+```bash
+QUERY_EXPANSION_ENABLED=1
+QUERY_EXPANSION_MAX_TOKENS=180
+QUERY_EXPANSION_CACHE_DAYS=30
+```
+
+模型只能返回 `canonical_topic`、`synonyms`、`search_queries` 和 `attributes` 四类短 JSON
+字段。后端会过滤泛词并校验格式，再交给本地检索做二次排序。扩展结果按规范化问题和模型版本
+持久化缓存；超时、非法 JSON 或没有可信结果时直接回退本地检索。该能力不改变答案生成方式。
+
 联网搜索默认关闭，避免普通问题产生额外网页请求和上下文 token。只有在服务端设置
 `WEB_SEARCH_ENABLED=1`，并且 API 请求显式传入 `disable_web_search=false` 时，
 智能体才会看到 `web_search` 工具；即使启用，也只允许在本地规范库依据不足时尝试一次。

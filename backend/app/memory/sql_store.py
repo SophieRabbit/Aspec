@@ -175,6 +175,18 @@ class SqlMemoryStore:
             Index("ix_analytics_visitor_time", "visitor_id", "created_at"),
             Index("ix_analytics_session_time", "session_id", "created_at"),
         )
+        self.query_expansion_cache = Table(
+            "query_expansion_cache",
+            self.metadata,
+            Column("cache_key", String(64), primary_key=True),
+            Column("query_text", Text, nullable=False),
+            Column("model", String(64), nullable=False),
+            Column("prompt_version", String(16), nullable=False),
+            Column("expansion_json", Text, nullable=False),
+            Column("hits", Integer, nullable=False, default=0),
+            Column("created_at", String(40), nullable=False),
+            Column("last_used_at", String(40), nullable=False),
+        )
         self.init_schema()
 
     def init_schema(self) -> None:
@@ -614,6 +626,66 @@ class SqlMemoryStore:
         with self.engine.connect() as connection:
             rows = connection.execute(statement).fetchall()
         return [_analytics_row_dict(row) for row in rows]
+
+    def get_query_expansion(self, cache_key: str) -> dict[str, Any] | None:
+        timestamp = _now()
+        with self.engine.begin() as connection:
+            row = connection.execute(
+                select(self.query_expansion_cache).where(
+                    self.query_expansion_cache.c.cache_key == cache_key
+                )
+            ).first()
+            if not row:
+                return None
+            item = _row_dict(row)
+            connection.execute(
+                self.query_expansion_cache.update()
+                .where(self.query_expansion_cache.c.cache_key == cache_key)
+                .values(
+                    hits=int(item.get("hits", 0)) + 1,
+                    last_used_at=timestamp,
+                )
+            )
+        return item
+
+    def save_query_expansion(
+        self,
+        *,
+        cache_key: str,
+        query_text: str,
+        model: str,
+        prompt_version: str,
+        expansion: dict[str, Any],
+    ) -> None:
+        timestamp = _now()
+        values = {
+            "query_text": query_text[:4000],
+            "model": model[:64],
+            "prompt_version": prompt_version[:16],
+            "expansion_json": json.dumps(expansion, ensure_ascii=False),
+            "last_used_at": timestamp,
+        }
+        with self.engine.begin() as connection:
+            existing = connection.execute(
+                select(self.query_expansion_cache.c.cache_key).where(
+                    self.query_expansion_cache.c.cache_key == cache_key
+                )
+            ).first()
+            if existing:
+                connection.execute(
+                    self.query_expansion_cache.update()
+                    .where(self.query_expansion_cache.c.cache_key == cache_key)
+                    .values(**values)
+                )
+            else:
+                connection.execute(
+                    self.query_expansion_cache.insert().values(
+                        cache_key=cache_key,
+                        hits=0,
+                        created_at=timestamp,
+                        **values,
+                    )
+                )
 
     def upsert_memory_item(
         self,

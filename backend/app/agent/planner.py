@@ -11,6 +11,7 @@ from ..config import (
     AGENT_FUNCTION_CALLING_ENABLED,
     AGENT_MAX_TOOL_TURNS,
     AGENT_TOOL_RESULT_CHARS,
+    QUERY_EXPANSION_ENABLED,
     RETRIEVAL_TOP_K,
     STABLE_ANSWER_MODE,
     STANDARD_STATUS_PATH,
@@ -54,6 +55,7 @@ from .tools import (
 )
 from services.compound_intent import detect_compound_intent
 from services.local_dependency import detect_local_dependency
+from services.query_expansion import QueryExpansionService
 from services.synonym_expander import expand_query_details
 
 REFERENCE_TERMS = (
@@ -126,6 +128,7 @@ class Planner:
         llm_client: FunctionCallingClient | None = None,
         *,
         stable_answer_mode: bool | None = None,
+        query_expansion_cache: Any | None = None,
     ) -> None:
         self.retriever = retriever
         self.llm_client = llm_client or FunctionCallingClient()
@@ -136,6 +139,15 @@ class Planner:
         )
         deterministic_llm_client = None if self.stable_answer_mode else self.llm_client
         self.retriever.llm_client = deterministic_llm_client
+        self.query_expander = (
+            QueryExpansionService(
+                self.llm_client,
+                cache=query_expansion_cache,
+            )
+            if QUERY_EXPANSION_ENABLED
+            else None
+        )
+        self.retriever.query_expander = self.query_expander
         self.intent_router = IntentRouter(llm_client=deterministic_llm_client)
         self.standard_status = self._load_standard_status()
 
@@ -1505,7 +1517,7 @@ class Planner:
                     "tier": source.get("tier", ""),
                 }
             )
-        return {"query": query, "items": items}
+        return {"query": query, "items": items[:10]}
 
     @staticmethod
     def _split_snippet_clause_fragments(
@@ -1897,6 +1909,41 @@ class Planner:
 
         if calculation and calculation.get("result") is not None:
             parts.append("【计算校验】\n" + calculation["note"])
+
+        fire_access_query = any(
+            term in query
+            for term in (
+                "消防登高面",
+                "消防登高场地",
+                "登高操作场地",
+                "登高操作面",
+                "消防救援场地",
+                "消防扑救面",
+            )
+        )
+        source_standards = {
+            re.sub(r"\s+", "", str(source.get("standard", "")))
+            for source in sources
+        }
+        if (
+            not comparison
+            and fire_access_query
+            and {"GB50016-2014", "GB55037-2022"} & source_standards
+        ):
+            parts.append(
+                "【消防车登高操作场地】\n"
+                "1. 高层建筑应至少沿一个长边设置消防车登高操作场地。\n"
+                "2. 场地长度和宽度分别不应小于 15m 和 10m；"
+                "建筑高度大于 50m 时分别不应小于 20m 和 10m。\n"
+                "3. 场地靠建筑外墙一侧的边缘距外墙不宜小于 5m，"
+                "且不应大于 10m。这里的距离通常指场地与建筑外墙的距离，"
+                "不是两栋建筑之间的防火间距。\n"
+                "4. 场地坡度不宜大于 3%，并应与消防车道连通。\n"
+                "GB55037-2022 同时要求场地与建筑之间不得有进深大于 4m 的裙房"
+                "或其他妨碍消防车操作的障碍物。\n"
+                "依据：GB50016-2014 第7.2.1、7.2.2条；"
+                "GB55037-2022 第3.4.6、3.4.7条。"
+            )
 
         place = requested_region.get("place", "") if requested_region else ""
         compound_intent = detect_compound_intent(

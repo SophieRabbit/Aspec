@@ -51,6 +51,7 @@ class FunctionCallingClient:
         tools: list[dict[str, Any]] | None = None,
         *,
         tool_choice: str | dict[str, Any] = "auto",
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         if not self.enabled:
             raise RuntimeError("LLM_API_BASE and LLM_API_KEY are required for function calling")
@@ -60,7 +61,7 @@ class FunctionCallingClient:
             "messages": messages,
             "temperature": 0,
             "tool_choice": tool_choice,
-            "max_tokens": self.max_output_tokens,
+            "max_tokens": max_tokens or self.max_output_tokens,
         }
         if tools:
             payload["tools"] = tools

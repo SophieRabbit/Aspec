@@ -17,10 +17,13 @@ const showIntentTrace =
 
 const searchGroups = computed(() => {
   const groups = new Map()
+  let remaining = 10
   for (const item of props.message.search_items || []) {
+    if (remaining <= 0) break
     const level = item.level || '相关规范'
     if (!groups.has(level)) groups.set(level, [])
     groups.get(level).push(item)
+    remaining -= 1
   }
   return [...groups.entries()].map(([level, items]) => ({ level, items }))
 })

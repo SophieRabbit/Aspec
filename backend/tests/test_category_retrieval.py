@@ -118,6 +118,37 @@ def test_named_residential_stair_comparison_is_structured_and_focused() -> None:
     }
 
 
+def test_fire_access_platform_query_returns_core_dimension_clauses() -> None:
+    planner = Planner(Retriever(KnowledgeBase()))
+    query = "消防登高面的尺寸及建筑的间距需求"
+
+    result = planner.run(
+        query,
+        enable_function_calling=False,
+        enable_web_search=False,
+    )
+    reply = result["reply"]
+
+    assert "场地长度和宽度分别不应小于 15m 和 10m" in reply
+    assert "建筑高度大于 50m" in reply
+    assert "距外墙不宜小于 5m" in reply
+    assert "不应大于 10m" in reply
+    assert "场地坡度不宜大于 3%" in reply
+    assert "不是两栋建筑之间的防火间距" in reply
+    assert {source["standard"] for source in result["sources"]} == {
+        "GB50016-2014",
+        "GB55037-2022",
+    }
+    assert result["sources"][0]["article"] == "7.2.2"
+    assert result["sources"][1]["article"] == "3.4.6-3.4.7"
+
+    items = planner.format_search_list(query)["items"]
+    assert [item["standard"] for item in items] == [
+        "GB55037-2022",
+        "GB50016-2014",
+    ]
+
+
 def test_stair_and_step_comparison_queries_return_identical_results() -> None:
     planner = Planner(Retriever(KnowledgeBase()))
 
@@ -170,6 +201,15 @@ def test_standard_list_prioritizes_jgj48_and_hides_obsolete() -> None:
     assert items[0]["standard"] == "JGJ48-2014"
     assert any(item["standard"] == "GB55031-2022" for item in items)
     assert all(item["standard"] != "GB50016-2006" for item in items)
+    assert len(items) <= 10
+
+
+def test_standard_list_never_returns_more_than_ten_items() -> None:
+    planner = Planner(Retriever(KnowledgeBase()))
+
+    items = planner.format_search_list("住宅相关规范有哪些")["items"]
+
+    assert len(items) <= 10
 
 
 def test_jinan_local_word_is_retrieved_first() -> None:

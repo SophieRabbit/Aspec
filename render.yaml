@@ -35,6 +35,12 @@ services:
         value: "8000"
       - key: AGENT_LLM_MAX_TOKENS
         value: "1200"
+      - key: QUERY_EXPANSION_ENABLED
+        value: "1"
+      - key: QUERY_EXPANSION_MAX_TOKENS
+        value: "180"
+      - key: QUERY_EXPANSION_CACHE_DAYS
+        value: "30"
       - key: MEMORY_LLM_ENABLED
         value: "0"
       - key: MEMORY_IMPORT_JSON

@@ -93,6 +93,12 @@ class MemoryStore:
     ) -> list[dict[str, Any]]:
         return self.sql.list_analytics_events(since=since, limit=limit)
 
+    def get_query_expansion(self, cache_key: str) -> dict[str, Any] | None:
+        return self.sql.get_query_expansion(cache_key)
+
+    def save_query_expansion(self, **values: Any) -> None:
+        self.sql.save_query_expansion(**values)
+
     def add_message(
         self,
         conversation_id: str,
