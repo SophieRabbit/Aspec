@@ -36,15 +36,21 @@
   -> LLM 生成最终答案
 ```
 
-配置了 `LLM_API_BASE` 和 `LLM_API_KEY` 后默认启用；没有配置、配置错误或 LLM 调用失败时，会自动回退到原规则 Planner，保证本地开发和评测稳定。
+默认使用规则 Planner。只有显式关闭稳定回答模式并启用 Function Calling 时，配置了
+`LLM_API_BASE` 和 `LLM_API_KEY` 的实例才会走 LLM 工具编排。
 
 ```bash
-AGENT_FUNCTION_CALLING_ENABLED=1
+STABLE_ANSWER_MODE=1
+AGENT_FUNCTION_CALLING_ENABLED=0
 AGENT_MAX_TOOL_TURNS=2
 AGENT_LLM_TIMEOUT_SECONDS=20
 AGENT_TOOL_RESULT_CHARS=8000
 AGENT_LLM_MAX_TOKENS=1200
 ```
+
+默认开启稳定回答模式。所有规范问答统一使用本地规则 Planner、规范检索和确定性答案生成，
+不再根据线上是否配置 LLM 而切换 Function Calling 或建筑类型识别链路。这样可以保证同一个
+问题在本地与线上返回相同的结构、规范和依据。
 
 联网搜索默认关闭，避免普通问题产生额外网页请求和上下文 token。只有在服务端设置
 `WEB_SEARCH_ENABLED=1`，并且 API 请求显式传入 `disable_web_search=false` 时，

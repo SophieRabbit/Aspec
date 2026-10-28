@@ -24,6 +24,8 @@ services:
           type: web
           property: host
       - key: AGENT_FUNCTION_CALLING_ENABLED
+        value: "0"
+      - key: STABLE_ANSWER_MODE
         value: "1"
       - key: WEB_SEARCH_ENABLED
         value: "0"
@@ -86,7 +88,7 @@ services:
           name: guibao-redis
           property: connectionString
       - key: AGENT_FUNCTION_CALLING_ENABLED
-        value: "1"
+        value: "0"
       - key: MEMORY_LLM_ENABLED
         value: "0"
       - key: LLM_API_BASE

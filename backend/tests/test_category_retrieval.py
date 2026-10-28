@@ -136,6 +136,30 @@ def test_stair_and_step_comparison_queries_return_identical_results() -> None:
     assert step_result["sources"] == stair_result["sources"]
 
 
+def test_explicit_comparison_uses_deterministic_path_when_llm_is_enabled() -> None:
+    class LLMMustNotBeCalled:
+        enabled = True
+
+        def chat(self, messages, tools=None, *, tool_choice="auto"):
+            raise AssertionError("explicit comparisons must use the deterministic rule path")
+
+    planner = Planner(
+        Retriever(KnowledgeBase()),
+        llm_client=LLMMustNotBeCalled(),
+    )
+    result = planner.run(
+        "比较住宅设计规范和民用建筑通用规范的楼梯规定",
+        enable_function_calling=True,
+        enable_web_search=False,
+    )
+
+    assert "| 对比项 | GB50096-2011《住宅设计规范》" in result["reply"]
+    assert {source["standard"] for source in result["sources"]} == {
+        "GB50096-2011",
+        "GB55031-2022",
+    }
+
+
 def test_standard_list_prioritizes_jgj48_and_hides_obsolete() -> None:
     planner = Planner(Retriever(KnowledgeBase()))
 

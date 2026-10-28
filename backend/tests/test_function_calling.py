@@ -60,7 +60,7 @@ class FakeLLM:
 def test_function_calling_executes_tool_and_returns_final_answer() -> None:
     retriever = FakeRetriever()
     llm = FakeLLM()
-    planner = Planner(retriever, llm_client=llm)
+    planner = Planner(retriever, llm_client=llm, stable_answer_mode=False)
 
     result = planner.run(
         "住宅楼梯踏步宽度和高度有什么要求？",
@@ -82,7 +82,7 @@ def test_function_calling_executes_tool_and_returns_final_answer() -> None:
 def test_function_calling_falls_back_to_rule_planner_on_error() -> None:
     retriever = FakeRetriever()
     llm = FakeLLM(raise_on_chat=True)
-    planner = Planner(retriever, llm_client=llm)
+    planner = Planner(retriever, llm_client=llm, stable_answer_mode=False)
 
     result = planner.run(
         "住宅楼梯踏步宽度和高度有什么要求？",
@@ -96,7 +96,7 @@ def test_function_calling_falls_back_to_rule_planner_on_error() -> None:
 def test_function_calling_exposes_web_search_only_when_explicitly_enabled() -> None:
     retriever = FakeRetriever()
     llm = FakeLLM()
-    planner = Planner(retriever, llm_client=llm)
+    planner = Planner(retriever, llm_client=llm, stable_answer_mode=False)
 
     planner.run(
         "住宅楼梯踏步宽度和高度有什么要求？",
@@ -113,7 +113,7 @@ def test_function_calling_dispatches_calculation_tool() -> None:
         first_tool_name="calculate_expression",
         first_tool_args={"query": "3*4"},
     )
-    planner = Planner(retriever, llm_client=llm)
+    planner = Planner(retriever, llm_client=llm, stable_answer_mode=False)
 
     result = planner.run(
         "帮我算一下 3 乘 4",
@@ -133,7 +133,7 @@ def test_function_calling_dispatches_regional_compare_tool() -> None:
             "regions": ["上海市", "北京市"],
         },
     )
-    planner = Planner(retriever, llm_client=llm)
+    planner = Planner(retriever, llm_client=llm, stable_answer_mode=False)
 
     result = planner.run(
         "对比上海和北京的防水规范",

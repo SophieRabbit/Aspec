@@ -12,6 +12,7 @@ from ..config import (
     AGENT_MAX_TOOL_TURNS,
     AGENT_TOOL_RESULT_CHARS,
     RETRIEVAL_TOP_K,
+    STABLE_ANSWER_MODE,
     STANDARD_STATUS_PATH,
 )
 from ..knowledge.keywords import extract_keywords
@@ -123,11 +124,19 @@ class Planner:
         self,
         retriever: Retriever,
         llm_client: FunctionCallingClient | None = None,
+        *,
+        stable_answer_mode: bool | None = None,
     ) -> None:
         self.retriever = retriever
         self.llm_client = llm_client or FunctionCallingClient()
-        self.retriever.llm_client = self.llm_client
-        self.intent_router = IntentRouter(llm_client=self.llm_client)
+        self.stable_answer_mode = (
+            STABLE_ANSWER_MODE
+            if stable_answer_mode is None
+            else stable_answer_mode
+        )
+        deterministic_llm_client = None if self.stable_answer_mode else self.llm_client
+        self.retriever.llm_client = deterministic_llm_client
+        self.intent_router = IntentRouter(llm_client=deterministic_llm_client)
         self.standard_status = self._load_standard_status()
 
     def plan(self, query: str) -> list[tuple[str, str, str]]:
@@ -159,7 +168,12 @@ class Planner:
         outside_place = detect_outside_mainland_place(query)
         if outside_place:
             return outside_mainland_result(query, outside_place)
-        if enable_function_calling and self.llm_client.enabled:
+        use_function_calling = (
+            enable_function_calling
+            and self.llm_client.enabled
+            and not self.stable_answer_mode
+        )
+        if use_function_calling:
             try:
                 result = self._run_function_calling(
                     query,
@@ -1383,7 +1397,7 @@ class Planner:
         )
         compound_intent = detect_compound_intent(
             query,
-            getattr(self, "llm_client", None),
+            None if getattr(self, "stable_answer_mode", True) else getattr(self, "llm_client", None),
         )
         topic = compound_intent.component or self._topic_term(query)
         concept_terms = tuple(
@@ -1923,7 +1937,7 @@ class Planner:
         place = requested_region.get("place", "") if requested_region else ""
         compound_intent = detect_compound_intent(
             query,
-            getattr(self, "llm_client", None),
+            None if getattr(self, "stable_answer_mode", True) else getattr(self, "llm_client", None),
         )
         topic = (
             compound_intent.topic
