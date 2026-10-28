@@ -220,6 +220,17 @@ python scripts/eval_intent.py
 每条助手回答底部提供“有帮助 / 没帮助”反馈。选择“没帮助”时，可以提交问题标签和补充说明。
 反馈会关联会话、回答消息、`trace_id`、意图识别结果、知识库版本和回答快照，便于后续分析。
 
+前端同时通过 `/api/analytics/events` 采集匿名产品埋点：
+
+- `page_view`：问答页面浏览，用于统计 PV、UV 和访问会话
+- `question_submit` / `answer_complete` / `answer_error`：提问与回答漏斗
+- `source_open` / `follow_up_click`：原文查看和追问使用情况
+- `feedback_submit`：反馈转化
+
+访客 ID 复用浏览器本地生成的匿名 ID，不写入 Cookie，也不生成浏览器指纹。事件存放在
+`analytics_events` 表，看板展示最近 14 天的 PV、UV、会话数、提问数、回答完成率、
+原文打开数、反馈转化、流量趋势和最近问题。
+
 同站反馈看板仅供产品经理收藏使用，不展示在普通用户导航中。内部地址为 `/dashboard`，
 包含反馈总数、有帮助率、14 天趋势、负反馈原因、问题类型分布和最近 30 条反馈。
 看板数据接口也要求登录，不能绕过前端直接匿名读取。

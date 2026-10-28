@@ -6,6 +6,7 @@ import ChatPanel from './components/ChatPanel.vue'
 import ConversationSidebar from './components/ConversationSidebar.vue'
 import DocumentModal from './components/DocumentModal.vue'
 import FeedbackDashboard from './components/FeedbackDashboard.vue'
+import { track, trackPageView } from './lib/analytics'
 
 const isDashboardRoute = window.location.pathname.replace(/\/+$/, '') === '/dashboard'
 const conversations = ref([])
@@ -54,6 +55,7 @@ async function selectConversation(id) {
   activeId.value = id
   messages.value = await restoreHistorySearch(id)
   sidebarOpen.value = false
+  track('conversation_open', {}, { conversationId: id })
 }
 
 async function restoreHistorySearch(id) {
@@ -91,6 +93,7 @@ async function newConversation() {
   activeId.value = conversation.conversation_id
   messages.value = []
   sidebarOpen.value = false
+  track('new_conversation', {}, { conversationId: conversation.conversation_id })
 }
 
 async function removeConversation(id) {
@@ -106,6 +109,10 @@ async function removeConversation(id) {
 async function send(text) {
   const content = text.trim()
   if (!content || loading.value) return
+  const startedAt = performance.now()
+  const requestId =
+    (crypto.randomUUID && crypto.randomUUID()) ||
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 
   let conversationId = activeId.value
   if (!conversationId) {
@@ -120,6 +127,15 @@ async function send(text) {
     content,
     created_at: new Date().toISOString(),
   })
+  track(
+    'question_submit',
+    {
+      request_id: requestId,
+      question: content.slice(0, 500),
+      question_length: content.length,
+    },
+    { conversationId },
+  )
   loading.value = true
   errorMessage.value = ''
   try {
@@ -127,6 +143,22 @@ async function send(text) {
       conversation_id: conversationId,
       message: content,
     })
+    track(
+      'answer_complete',
+      {
+        request_id: requestId,
+        question: content.slice(0, 500),
+        intent: result.intent || '',
+        source_count: result.sources?.length || 0,
+        latency_ms: Math.round(performance.now() - startedAt),
+        answer_chars: result.reply?.length || 0,
+      },
+      {
+        conversationId: result.conversation_id,
+        messageId: result.message_id,
+        traceId: result.trace_id,
+      },
+    )
     let searchItems = []
     if (shouldSearchStandards(result)) {
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -168,12 +200,22 @@ async function send(text) {
     await loadConversations()
   } catch (error) {
     errorMessage.value = error.message || '请求失败，请稍后重试'
+    track(
+      'answer_error',
+      {
+        request_id: requestId,
+        question: content.slice(0, 500),
+        latency_ms: Math.round(performance.now() - startedAt),
+      },
+      { conversationId },
+    )
   } finally {
     loading.value = false
   }
 }
 
 function followUp(text) {
+  track('follow_up_click')
   send(text)
 }
 
@@ -192,10 +234,20 @@ function openDocument(detail) {
     article: detail.article || '',
     page: detail.book_page || detail.page || null,
   }
+  track(
+    'source_open',
+    {
+      doc_id: detail.doc_id || '',
+      article: detail.article || '',
+      page: detail.book_page || detail.page || null,
+    },
+    { conversationId: activeId.value },
+  )
 }
 
 onMounted(async () => {
   if (isDashboardRoute) return
+  trackPageView({ page_name: '规范问答' })
   if ('scrollRestoration' in history) {
     history.scrollRestoration = 'manual'
   }

@@ -49,6 +49,7 @@ from ..knowledge.mainland_scope import (
 from ..knowledge.region_hierarchy import detect_requested_region
 from ..knowledge.retriever import Retriever, tokenize
 from ..memory.store import MemoryStore
+from services.analytics_dashboard import build_analytics_dashboard
 from services.synonym_expander import expand_query_details
 
 router = APIRouter(prefix="/api")
@@ -117,6 +118,42 @@ def _resolve_user_id(header_user_id: str | None, payload_user_id: str | None = N
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "规宝 API"}
+
+
+@router.post("/analytics/events", response_model=schemas.AnalyticsBatchResponse)
+def collect_analytics_events(
+    payload: schemas.AnalyticsBatchRequest,
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    x_visitor_id: str | None = Header(default=None, alias="X-Visitor-Id"),
+    x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
+) -> schemas.AnalyticsBatchResponse:
+    user_id = _resolve_user_id(x_user_id)
+    visitor_id = _resolve_user_id(x_visitor_id or x_user_id, "anonymous")
+    session_id = re.sub(
+        r"[^0-9a-zA-Z_.:-]",
+        "",
+        x_session_id or "",
+    )[:64] or "unknown"
+    events = []
+    for item in payload.events:
+        properties = dict(item.properties)
+        if "question" in properties:
+            properties["question"] = str(properties["question"])[:500]
+        events.append(
+            {
+                "event_name": item.name,
+                "visitor_id": visitor_id,
+                "session_id": session_id,
+                "user_id": user_id,
+                "path": item.path,
+                "conversation_id": item.conversation_id,
+                "message_id": item.message_id,
+                "trace_id": item.trace_id,
+                "properties": properties,
+            }
+        )
+    accepted = memory_store.add_analytics_events(events)
+    return schemas.AnalyticsBatchResponse(accepted=accepted)
 
 
 @router.post("/feedback", response_model=schemas.FeedbackRecord)
@@ -372,8 +409,19 @@ def feedback_dashboard(
 ) -> schemas.FeedbackDashboardResponse:
     _require_feedback_dashboard_auth(authorization)
     response.headers["Cache-Control"] = "no-store"
+    now = datetime.now(ZoneInfo("Asia/Shanghai"))
+    analytics_events = memory_store.list_analytics_events(
+        since=(now - timedelta(days=14)).isoformat(),
+    )
     return schemas.FeedbackDashboardResponse(
-        **_feedback_dashboard_payload(memory_store.list_feedback())
+        **_feedback_dashboard_payload(memory_store.list_feedback()),
+        analytics=schemas.AnalyticsDashboard(
+            **build_analytics_dashboard(
+                analytics_events,
+                days=14,
+                now=now,
+            )
+        ),
     )
 
 

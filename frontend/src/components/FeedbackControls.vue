@@ -2,6 +2,7 @@
 import { Check, MessageSquareWarning, Send, ThumbsDown, ThumbsUp } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { api } from '../api'
+import { track } from '../lib/analytics'
 
 const props = defineProps({
   message: { type: Object, required: true },
@@ -89,6 +90,19 @@ async function submitFeedback(rating) {
     submitted.value = result
     formOpen.value = false
     editing.value = false
+    track(
+      'feedback_submit',
+      {
+        rating,
+        reason_codes: rating === 'helpful' ? [] : selectedReasons.value,
+        has_comment: rating === 'not_helpful' && Boolean(comment.value.trim()),
+      },
+      {
+        conversationId: props.message.conversation_id,
+        messageId: props.message.message_id || props.message.id,
+        traceId: props.message.trace_id,
+      },
+    )
   } catch (submitError) {
     error.value = submitError.message || '反馈提交失败，请稍后重试'
   } finally {

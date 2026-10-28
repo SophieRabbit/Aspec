@@ -3,12 +3,16 @@ import {
   ArrowLeft,
   BarChart3,
   Clock3,
+  Eye,
   LockKeyhole,
   LogOut,
   MessageSquareText,
+  MousePointerClick,
   RefreshCw,
+  Route,
   ThumbsDown,
   ThumbsUp,
+  TrendingUp,
   Users,
 } from 'lucide-vue-next'
 import { computed, onMounted, ref } from 'vue'
@@ -62,6 +66,42 @@ const reasonMax = computed(() => {
 const intentMax = computed(() => {
   if (!dashboard.value) return 1
   return Math.max(1, ...dashboard.value.intents.map((item) => item.count))
+})
+
+const analytics = computed(() => dashboard.value?.analytics || null)
+
+const trafficMax = computed(() => {
+  if (!analytics.value) return 1
+  return Math.max(
+    1,
+    ...analytics.value.trend.map((item) =>
+      Math.max(item.pv, item.questions, item.answers),
+    ),
+  )
+})
+
+const funnelSteps = computed(() => {
+  if (!analytics.value) return []
+  const summary = analytics.value.summary
+  const pvBase = Math.max(1, summary.pv)
+  return [
+    { label: '页面访问 PV', value: summary.pv, rate: 100 },
+    {
+      label: '发起提问',
+      value: summary.questions,
+      rate: Math.round(summary.questions / pvBase * 1000) / 10,
+    },
+    {
+      label: '回答完成',
+      value: summary.answers,
+      rate: Math.round(summary.answers / pvBase * 1000) / 10,
+    },
+    {
+      label: '提交反馈',
+      value: summary.feedback_submits,
+      rate: Math.round(summary.feedback_submits / pvBase * 1000) / 10,
+    },
+  ]
 })
 
 function encodeBasicAuth(user, pass) {
@@ -124,6 +164,15 @@ function refresh() {
 function barHeight(value) {
   if (!value) return '3px'
   return `${Math.max(8, Math.round(value / trendMax.value * 100))}%`
+}
+
+function trafficBarHeight(value) {
+  if (!value) return '3px'
+  return `${Math.max(8, Math.round(value / trafficMax.value * 100))}%`
+}
+
+function funnelWidth(value) {
+  return `${Math.max(4, Math.round(value))}%`
 }
 
 function relativeWidth(value, maximum) {
@@ -232,6 +281,118 @@ onMounted(() => {
         </section>
 
         <p v-if="error" class="dashboard-error">{{ error }}</p>
+
+        <div class="dashboard-group-heading">
+          <div>
+            <h2>流量与问答</h2>
+            <p>统计最近 14 天内的匿名访问和问答转化</p>
+          </div>
+          <span>PV / UV / Session</span>
+        </div>
+
+        <section class="dashboard-stat-grid">
+          <article class="dashboard-stat-card">
+            <span class="stat-icon accent"><Eye :size="20" /></span>
+            <p>页面浏览量 PV</p>
+            <strong>{{ analytics.summary.pv }}</strong>
+            <small>每次问答页加载计一次</small>
+          </article>
+          <article class="dashboard-stat-card">
+            <span class="stat-icon neutral"><Users :size="20" /></span>
+            <p>独立访客 UV</p>
+            <strong>{{ analytics.summary.uv }}</strong>
+            <small>按匿名访客 ID 去重</small>
+          </article>
+          <article class="dashboard-stat-card">
+            <span class="stat-icon positive"><MousePointerClick :size="20" /></span>
+            <p>访问会话数</p>
+            <strong>{{ analytics.summary.sessions }}</strong>
+            <small>{{ analytics.summary.questions }} 次问题提交</small>
+          </article>
+          <article class="dashboard-stat-card">
+            <span class="stat-icon neutral"><TrendingUp :size="20" /></span>
+            <p>回答完成率</p>
+            <strong>{{ analytics.summary.answer_rate }}%</strong>
+            <small>
+              {{ analytics.summary.answers }} 次完成 ·
+              {{ analytics.summary.answer_errors }} 次失败
+            </small>
+          </article>
+        </section>
+
+        <section class="dashboard-traffic-grid">
+          <article class="dashboard-panel">
+            <div class="dashboard-panel-heading">
+              <div>
+                <h2>流量与提问趋势</h2>
+                <p>每天 PV、UV 与问题提交量</p>
+              </div>
+              <div class="dashboard-legend">
+                <span><i class="legend-dot pv"></i>PV</span>
+                <span><i class="legend-dot questions"></i>提问</span>
+                <span><i class="legend-dot uv"></i>UV</span>
+              </div>
+            </div>
+            <div class="traffic-chart">
+              <div
+                v-for="point in analytics.trend"
+                :key="point.date"
+                class="traffic-column"
+                :title="`${point.date}：PV ${point.pv}，UV ${point.uv}，提问 ${point.questions}`"
+              >
+                <span class="traffic-total">{{ point.pv || '' }}</span>
+                <div class="traffic-track">
+                  <span
+                    class="traffic-bar pv"
+                    :style="{ height: trafficBarHeight(point.pv) }"
+                  ></span>
+                  <span
+                    class="traffic-bar questions"
+                    :style="{ height: trafficBarHeight(point.questions) }"
+                  ></span>
+                </div>
+                <span class="traffic-uv">{{ point.uv ? `UV ${point.uv}` : '' }}</span>
+                <span class="trend-date">{{ point.date }}</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="dashboard-panel">
+            <div class="dashboard-panel-heading">
+              <div>
+                <h2>问答转化漏斗</h2>
+                <p>从页面访问到反馈提交的转化情况</p>
+              </div>
+              <span class="funnel-icon"><Route :size="18" /></span>
+            </div>
+            <div class="funnel-list">
+              <div v-for="step in funnelSteps" :key="step.label" class="funnel-row">
+                <div class="funnel-label">
+                  <span>{{ step.label }}</span>
+                  <strong>{{ step.value }}</strong>
+                </div>
+                <div class="funnel-track">
+                  <span
+                    class="funnel-fill"
+                    :style="{ width: funnelWidth(step.rate) }"
+                  ></span>
+                </div>
+                <small>{{ step.rate }}%</small>
+              </div>
+            </div>
+            <div class="dashboard-inline-metrics">
+              <span>打开原文 {{ analytics.summary.source_opens }}</span>
+              <span>反馈转化 {{ analytics.summary.feedback_rate }}%</span>
+            </div>
+          </article>
+        </section>
+
+        <div class="dashboard-group-heading">
+          <div>
+            <h2>反馈质量</h2>
+            <p>回答满意度与需要复核的负反馈</p>
+          </div>
+        </div>
 
         <section class="dashboard-stat-grid">
           <article class="dashboard-stat-card">
@@ -352,6 +513,43 @@ onMounted(() => {
             </div>
             <p v-else class="dashboard-empty">暂无意图分布数据</p>
           </article>
+        </section>
+
+        <section class="dashboard-panel dashboard-question-panel">
+          <div class="dashboard-panel-heading">
+            <div>
+              <h2>最近提问</h2>
+              <p>最近 20 次用户问题及回答状态</p>
+            </div>
+          </div>
+          <div v-if="analytics.recent_questions.length" class="recent-question-list">
+            <article
+              v-for="(item, index) in analytics.recent_questions"
+              :key="`${item.created_at}-${index}`"
+              class="recent-question-item"
+            >
+              <div class="recent-question-copy">
+                <strong>{{ item.question || '未记录问题文本' }}</strong>
+                <span>
+                  {{ intentLabels[item.intent] || item.intent || '意图未记录' }}
+                  · {{ item.source_count }} 条来源
+                  <template v-if="item.latency_ms">
+                    · {{ item.latency_ms }} ms
+                  </template>
+                </span>
+              </div>
+              <div class="recent-question-meta">
+                <span
+                  class="question-status"
+                  :class="{ answered: item.status === 'answered' }"
+                >
+                  {{ item.status === 'answered' ? '已回答' : '已提交' }}
+                </span>
+                <time>{{ formatTime(item.created_at) }}</time>
+              </div>
+            </article>
+          </div>
+          <p v-else class="dashboard-empty">暂无提问埋点数据</p>
         </section>
 
         <section class="dashboard-panel">
@@ -982,12 +1180,236 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.dashboard-group-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 28px 2px 13px;
+}
+
+.dashboard-group-heading h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.dashboard-group-heading p {
+  margin: 5px 0 0;
+  color: #7a8692;
+  font-size: 12px;
+}
+
+.dashboard-group-heading > span {
+  color: #9aa4ae;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.dashboard-traffic-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.75fr) minmax(280px, 0.85fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.legend-dot.pv,
+.traffic-bar.pv {
+  background: #0f766e;
+}
+
+.legend-dot.questions,
+.traffic-bar.questions {
+  background: #d58a2c;
+}
+
+.legend-dot.uv {
+  background: #4f6d8c;
+}
+
+.traffic-chart {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(22px, 1fr));
+  gap: 6px;
+  height: 230px;
+  padding-top: 4px;
+}
+
+.traffic-column {
+  display: grid;
+  grid-template-rows: 17px 1fr 15px 20px;
+  min-width: 0;
+  text-align: center;
+}
+
+.traffic-total,
+.traffic-uv {
+  color: #7d8995;
+  font-size: 9px;
+}
+
+.traffic-track {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  height: 100%;
+  border-bottom: 1px solid #e4e9ed;
+  background: linear-gradient(to top, #f2f5f7 1px, transparent 1px) 0 0 / 100% 25%;
+}
+
+.traffic-bar {
+  display: block;
+  width: 9px;
+  min-height: 3px;
+  border-radius: 3px 3px 0 0;
+  opacity: 0.92;
+}
+
+.traffic-bar.questions {
+  width: 6px;
+}
+
+.funnel-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: #e6f4f2;
+  color: #0f766e;
+}
+
+.funnel-list {
+  display: grid;
+  gap: 16px;
+}
+
+.funnel-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 50px;
+  gap: 5px 10px;
+}
+
+.funnel-label {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  color: #4e5b67;
+  font-size: 12px;
+}
+
+.funnel-label strong {
+  color: #17212b;
+}
+
+.funnel-track {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #edf1f3;
+}
+
+.funnel-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0f766e, #42a39b);
+}
+
+.funnel-row small {
+  color: #7e8a96;
+  font-size: 10px;
+  text-align: right;
+}
+
+.dashboard-inline-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.dashboard-inline-metrics span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #f1f5f7;
+  color: #667380;
+  font-size: 10px;
+}
+
+.dashboard-question-panel {
+  margin-bottom: 16px;
+}
+
+.recent-question-list {
+  display: grid;
+  gap: 9px;
+}
+
+.recent-question-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 14px;
+  border: 1px solid #e6ebef;
+  border-radius: 11px;
+  background: #fbfcfd;
+}
+
+.recent-question-copy {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.recent-question-copy strong {
+  overflow: hidden;
+  color: #27333e;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-question-copy span,
+.recent-question-meta time {
+  color: #8994a0;
+  font-size: 10px;
+}
+
+.recent-question-meta {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 9px;
+}
+
+.question-status {
+  padding: 4px 7px;
+  border-radius: 99px;
+  background: #fff2df;
+  color: #a45d12;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.question-status.answered {
+  background: #e8f5ed;
+  color: #18794e;
+}
+
 @media (max-width: 900px) {
   .dashboard-stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .dashboard-analysis-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-traffic-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1043,6 +1465,22 @@ onMounted(() => {
   .feedback-time {
     width: 100%;
     margin-left: 0;
+  }
+
+  .recent-question-item {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .recent-question-meta {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .traffic-chart {
+    grid-template-columns: repeat(14, 34px);
+    overflow-x: auto;
   }
 }
 </style>

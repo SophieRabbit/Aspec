@@ -110,6 +110,33 @@ class FeedbackRequest(BaseModel):
     source_article: str = Field(default="", max_length=64)
 
 
+class AnalyticsEventRequest(BaseModel):
+    name: Literal[
+        "page_view",
+        "new_conversation",
+        "conversation_open",
+        "question_submit",
+        "answer_complete",
+        "answer_error",
+        "source_open",
+        "follow_up_click",
+        "feedback_submit",
+    ]
+    path: str = Field(default="/", max_length=255)
+    conversation_id: str = Field(default="", max_length=64)
+    message_id: str = Field(default="", max_length=64)
+    trace_id: str = Field(default="", max_length=64)
+    properties: dict = Field(default_factory=dict)
+
+
+class AnalyticsBatchRequest(BaseModel):
+    events: list[AnalyticsEventRequest] = Field(min_length=1, max_length=20)
+
+
+class AnalyticsBatchResponse(BaseModel):
+    accepted: int
+
+
 class FeedbackDashboardSummary(BaseModel):
     total: int
     helpful: int
@@ -146,6 +173,44 @@ class FeedbackDashboardItem(BaseModel):
     updated_at: str = ""
 
 
+class AnalyticsDashboardSummary(BaseModel):
+    pv: int
+    uv: int
+    sessions: int
+    questions: int
+    answers: int
+    answer_errors: int
+    source_opens: int
+    feedback_submits: int
+    answer_rate: float
+    feedback_rate: float
+
+
+class AnalyticsDashboardTrendPoint(BaseModel):
+    date: str
+    pv: int
+    uv: int
+    questions: int
+    answers: int
+
+
+class AnalyticsRecentQuestion(BaseModel):
+    question: str
+    intent: str = ""
+    source_count: int = 0
+    latency_ms: int = 0
+    status: str = "submitted"
+    created_at: str = ""
+
+
+class AnalyticsDashboard(BaseModel):
+    generated_at: str
+    summary: AnalyticsDashboardSummary
+    trend: list[AnalyticsDashboardTrendPoint] = []
+    intents: list[FeedbackDashboardCount] = []
+    recent_questions: list[AnalyticsRecentQuestion] = []
+
+
 class FeedbackDashboardResponse(BaseModel):
     generated_at: str
     summary: FeedbackDashboardSummary
@@ -153,6 +218,7 @@ class FeedbackDashboardResponse(BaseModel):
     reasons: list[FeedbackDashboardCount] = []
     intents: list[FeedbackDashboardCount] = []
     recent: list[FeedbackDashboardItem] = []
+    analytics: AnalyticsDashboard
 
 
 class MessageRecord(BaseModel):

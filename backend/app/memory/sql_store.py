@@ -43,6 +43,15 @@ def _feedback_row_dict(row: Any) -> dict[str, Any]:
     return item
 
 
+def _analytics_row_dict(row: Any) -> dict[str, Any]:
+    item = _row_dict(row)
+    try:
+        item["properties"] = json.loads(item.pop("properties_json") or "{}")
+    except json.JSONDecodeError:
+        item["properties"] = {}
+    return item
+
+
 class SqlMemoryStore:
     """SQL storage for raw conversations and the structured memory library."""
 
@@ -145,6 +154,24 @@ class SqlMemoryStore:
             UniqueConstraint("user_id", "message_id", name="uq_feedback_user_message"),
             Index("ix_feedback_conversation", "conversation_id", "created_at"),
             Index("ix_feedback_rating", "rating", "created_at"),
+        )
+        self.analytics_events = Table(
+            "analytics_events",
+            self.metadata,
+            Column("id", String(32), primary_key=True),
+            Column("event_name", String(48), nullable=False),
+            Column("visitor_id", String(128), nullable=False),
+            Column("session_id", String(64), nullable=False),
+            Column("user_id", String(128), nullable=False, default=""),
+            Column("path", String(255), nullable=False, default="/"),
+            Column("conversation_id", String(64), nullable=False, default=""),
+            Column("message_id", String(64), nullable=False, default=""),
+            Column("trace_id", String(64), nullable=False, default=""),
+            Column("properties_json", Text, nullable=False, default="{}"),
+            Column("created_at", String(40), nullable=False),
+            Index("ix_analytics_event_time", "event_name", "created_at"),
+            Index("ix_analytics_visitor_time", "visitor_id", "created_at"),
+            Index("ix_analytics_session_time", "session_id", "created_at"),
         )
         self.init_schema()
 
@@ -501,6 +528,52 @@ class SqlMemoryStore:
         with self.engine.connect() as connection:
             rows = connection.execute(statement).fetchall()
         return [_feedback_row_dict(row) for row in rows]
+
+    def add_analytics_events(self, events: list[dict[str, Any]]) -> int:
+        if not events:
+            return 0
+        timestamp = _now()
+        values = []
+        for event in events:
+            properties = json.dumps(
+                event.get("properties") or {},
+                ensure_ascii=False,
+                default=str,
+            )
+            if len(properties) > 4000:
+                properties = json.dumps({"truncated": True})
+            values.append(
+                {
+                    "id": uuid.uuid4().hex[:12],
+                    "event_name": str(event.get("event_name", ""))[:48],
+                    "visitor_id": str(event.get("visitor_id", ""))[:128],
+                    "session_id": str(event.get("session_id", ""))[:64],
+                    "user_id": str(event.get("user_id", ""))[:128],
+                    "path": str(event.get("path", "/"))[:255],
+                    "conversation_id": str(event.get("conversation_id", ""))[:64],
+                    "message_id": str(event.get("message_id", ""))[:64],
+                    "trace_id": str(event.get("trace_id", ""))[:64],
+                    "properties_json": properties,
+                    "created_at": timestamp,
+                }
+            )
+        with self.engine.begin() as connection:
+            connection.execute(self.analytics_events.insert(), values)
+        return len(values)
+
+    def list_analytics_events(
+        self,
+        *,
+        since: str | None = None,
+        limit: int = 200000,
+    ) -> list[dict[str, Any]]:
+        statement = select(self.analytics_events)
+        if since:
+            statement = statement.where(self.analytics_events.c.created_at >= since)
+        statement = statement.order_by(self.analytics_events.c.created_at.desc()).limit(limit)
+        with self.engine.connect() as connection:
+            rows = connection.execute(statement).fetchall()
+        return [_analytics_row_dict(row) for row in rows]
 
     def upsert_memory_item(
         self,

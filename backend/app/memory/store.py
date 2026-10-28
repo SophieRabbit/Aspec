@@ -82,6 +82,17 @@ class MemoryStore:
     def list_feedback(self, *, limit: int = 10000) -> list[dict[str, Any]]:
         return self.sql.list_feedback(limit=limit)
 
+    def add_analytics_events(self, events: list[dict[str, Any]]) -> int:
+        return self.sql.add_analytics_events(events)
+
+    def list_analytics_events(
+        self,
+        *,
+        since: str | None = None,
+        limit: int = 200000,
+    ) -> list[dict[str, Any]]:
+        return self.sql.list_analytics_events(since=since, limit=limit)
+
     def add_message(
         self,
         conversation_id: str,

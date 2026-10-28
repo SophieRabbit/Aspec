@@ -1,6 +1,6 @@
-const API_BASE = (import.meta.env?.VITE_API_BASE || '').replace(/\/$/, '')
+export const API_BASE = (import.meta.env?.VITE_API_BASE || '').replace(/\/$/, '')
 
-function ensureUserId() {
+export function ensureVisitorId() {
   try {
     let userId = localStorage.getItem('guibao_user_id')
     if (!userId) {
@@ -21,7 +21,7 @@ async function request(path, options = {}) {
     ...rest,
     headers: {
       'Content-Type': 'application/json',
-      'X-User-Id': ensureUserId(),
+      'X-User-Id': ensureVisitorId(),
       ...(headers || {}),
     },
   })
