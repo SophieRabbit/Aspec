@@ -49,6 +49,14 @@ def test_chitchat_is_detected_without_knowledge_retrieval() -> None:
         assert result.confidence >= 0.9
 
 
+def test_known_synonym_term_is_not_rejected_as_fallback() -> None:
+    router = IntentRouter()
+    result = router.classify("消防登高面", use_llm=False)
+
+    assert result.intent == INTENT_TERM
+    assert result.source == "rules"
+
+
 def test_explicit_out_of_scope_question_skips_llm_classification() -> None:
     class FakeLLM:
         enabled = True

@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from services.synonym_expander import expand_query_details
+
 from .llm import FunctionCallingClient
 
 
@@ -315,6 +317,15 @@ class IntentRouter:
         rule_result = self._classify_by_rules(normalized)
         if rule_result.confidence >= self.low_confidence_threshold:
             return rule_result
+        if rule_result.intent == INTENT_FALLBACK and expand_query_details(normalized).matches:
+            return IntentResult(
+                intent=INTENT_TERM,
+                confidence=0.82,
+                matched_patterns=(),
+                source="rules",
+                query=normalized,
+                strategy=INTENT_STRATEGIES[INTENT_TERM],
+            )
 
         llm_result: IntentResult | None = None
         if use_llm and self.llm_client is not None and self.llm_client.enabled:

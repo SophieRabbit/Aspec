@@ -149,6 +149,23 @@ def test_fire_access_platform_query_returns_core_dimension_clauses() -> None:
     ]
 
 
+def test_short_fire_access_platform_term_still_returns_core_clauses() -> None:
+    planner = Planner(Retriever(KnowledgeBase()))
+
+    result = planner.run(
+        "消防登高面",
+        enable_function_calling=False,
+        enable_web_search=False,
+    )
+
+    assert "15m" in result["reply"]
+    assert "5m" in result["reply"]
+    assert {source["standard"] for source in result["sources"]} == {
+        "GB50016-2014",
+        "GB55037-2022",
+    }
+
+
 def test_stair_and_step_comparison_queries_return_identical_results() -> None:
     planner = Planner(Retriever(KnowledgeBase()))
 
