@@ -15,7 +15,10 @@ defineEmits(['close'])
 
 const detail = ref(null)
 const loading = ref(true)
+const loadingMore = ref(false)
 const error = ref('')
+const loadMoreError = ref('')
+const modalBody = ref(null)
 
 function docTableHtml(block) {
   return markdownTableToHtml(block, {
@@ -47,25 +50,60 @@ function docContentBlocks(htmlText) {
   return blocks
 }
 
-onMounted(async () => {
+async function loadPage(offset, initial = false) {
+  if (initial) {
+    loading.value = true
+    error.value = ''
+  } else {
+    if (loadingMore.value || !detail.value?.has_more) return
+    loadingMore.value = true
+    loadMoreError.value = ''
+  }
   try {
-    detail.value = await api.specDetail(
+    const result = await api.specDetail(
       props.docId,
       props.query,
       props.article,
       props.page,
+      offset,
+      30,
     )
+    if (initial) {
+      detail.value = result
+    } else {
+      detail.value.snippets.push(...(result.snippets || []))
+      detail.value.total_snippets = result.total_snippets
+      detail.value.has_more = result.has_more
+    }
   } catch (requestError) {
-    error.value = requestError.message || '规范详情加载失败'
+    if (initial) {
+      error.value = requestError.message || '规范详情加载失败'
+    } else {
+      loadMoreError.value = requestError.message || '后续原文加载失败'
+    }
   } finally {
-    loading.value = false
+    if (initial) loading.value = false
+    loadingMore.value = false
   }
-})
+}
+
+function onScroll(event) {
+  if (!detail.value?.has_more || loadingMore.value) return
+  const element = event.currentTarget
+  if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) {
+    loadPage(detail.value.snippets.length)
+  }
+}
+
+onMounted(() => loadPage(0, true))
 </script>
 
 <template>
   <div class="modal-overlay" @click.self="$emit('close')">
-    <section class="document-modal">
+    <section
+      class="document-modal"
+      :class="{ 'full-text-mode': detail?.full_text }"
+    >
       <header class="modal-header">
         <div class="modal-title-block">
           <div class="modal-badges">
@@ -89,7 +127,7 @@ onMounted(async () => {
         </div>
       </header>
 
-      <div class="modal-body">
+      <div ref="modalBody" class="modal-body" @scroll.passive="onScroll">
         <div v-if="loading" class="modal-state">
           <LoaderCircle :size="22" class="spin" />
           <span>正在加载规范详情</span>
@@ -104,6 +142,12 @@ onMounted(async () => {
           class="modal-note"
         >
           当前问题未直接命中该规范，以下为该规范部分正文
+        </div>
+        <div
+          v-if="detail?.full_text"
+          class="modal-note"
+        >
+          已根据规范名称匹配并展示全文，共 {{ detail.total_snippets }} 个原文段落。
         </div>
         <article
           v-for="(snippet, index) in detail?.snippets"
@@ -132,6 +176,19 @@ onMounted(async () => {
             <p v-else v-html="block.html"></p>
           </template>
         </article>
+        <div v-if="loadingMore" class="modal-state modal-loading-more">
+          <LoaderCircle :size="18" class="spin" />
+          <span>正在加载更多原文</span>
+        </div>
+        <div v-else-if="loadMoreError" class="modal-state modal-error">
+          {{ loadMoreError }}
+        </div>
+        <div
+          v-else-if="detail?.snippets?.length && !detail?.has_more"
+          class="modal-end-note"
+        >
+          已加载全部 {{ detail.total_snippets }} 个原文段落
+        </div>
       </div>
     </section>
   </div>

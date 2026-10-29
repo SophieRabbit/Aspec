@@ -60,9 +60,18 @@ const searchGroups = computed(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="item in group.items" :key="item.doc_id">
+              <tr
+                v-for="item in group.items"
+                :key="item.doc_id"
+                :class="{ 'full-text-match-row': item.full_text_match }"
+              >
                 <td>{{ item.standard }}</td>
-                <td>{{ item.title }}</td>
+                <td>
+                  {{ item.title }}
+                  <span v-if="item.full_text_match" class="full-text-match-badge">
+                    全文匹配
+                  </span>
+                </td>
                 <td>{{ item.status }}</td>
                 <td>{{ item.effective_date }}</td>
                 <td>

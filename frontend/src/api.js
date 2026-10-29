@@ -47,8 +47,12 @@ export const api = {
     ),
   search: (query) =>
     request(`/api/search?q=${encodeURIComponent(query)}`),
-  specDetail: (docId, query, article = '', page = null) => {
-    const params = new URLSearchParams({ q: query || '' })
+  specDetail: (docId, query, article = '', page = null, offset = 0, limit = 30) => {
+    const params = new URLSearchParams({
+      q: query || '',
+      offset: String(offset),
+      limit: String(limit),
+    })
     if (article) params.set('article', article)
     if (page) params.set('page', String(page))
     return request(

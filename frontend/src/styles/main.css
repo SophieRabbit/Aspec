@@ -1020,6 +1020,22 @@ button {
   vertical-align: top;
 }
 
+.search-table tr.full-text-match-row td {
+  background: #f1faf7;
+}
+
+.full-text-match-badge {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+
 .search-table th {
   background: var(--surface-soft);
   color: var(--text-secondary);
@@ -1481,6 +1497,10 @@ mark {
   box-shadow: 0 24px 64px rgba(18, 27, 39, 0.24);
 }
 
+.document-modal.full-text-mode {
+  background: #fbfdfc;
+}
+
 .modal-header {
   display: flex;
   align-items: flex-start;
@@ -1608,6 +1628,10 @@ mark {
   background: var(--accent-soft);
 }
 
+.document-modal.full-text-mode .doc-match {
+  background: #fbfdfc;
+}
+
 .doc-match-meta {
   display: flex;
   flex-wrap: wrap;
@@ -1643,6 +1667,17 @@ mark {
   text-decoration: underline;
   text-decoration-thickness: 1.5px;
   text-underline-offset: 4px;
+}
+
+.modal-loading-more {
+  min-height: 84px;
+}
+
+.modal-end-note {
+  padding: 18px 20px 24px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
 }
 
 @media (max-width: 720px) {

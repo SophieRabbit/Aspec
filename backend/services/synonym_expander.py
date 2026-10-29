@@ -66,6 +66,14 @@ def match_synonym_groups(query: str) -> tuple[SynonymGroupMatch, ...]:
     return tuple(matches)
 
 
+def match_canonical_terms(query: str) -> tuple[str, ...]:
+    return tuple(
+        canonical
+        for item in _load_groups()
+        if (canonical := str(item.get("canonical", "")).strip()) and canonical in query
+    )
+
+
 def expand_query_details(query: str) -> QueryExpansion:
     matches = match_synonym_groups(query)
     terms: list[str] = []

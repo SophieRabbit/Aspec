@@ -327,9 +327,39 @@ def test_sichuan_residential_standard_detail_falls_back_to_body_text() -> None:
     )
 
     assert detail is not None
-    assert detail["matched"] is False
-    assert detail["snippets"]
+    assert detail["matched"] is True
+    assert detail["full_text"] is True
+    assert len(detail["snippets"]) > 100
     assert any("1.0.2" in item["text"] for item in detail["snippets"])
+
+    search_items = planner.format_search_list("四川省住宅规范")["items"]
+    sichuan_item = next(
+        item
+        for item in search_items
+        if item["doc_id"] == "四川省-dbj51-168-2021"
+    )
+    assert sichuan_item["full_text_match"] is True
+
+    first_page = planner.format_spec_detail(
+        "四川省-dbj51-168-2021",
+        "四川省住宅规范",
+        offset=0,
+        limit=30,
+    )
+    assert first_page is not None
+    assert first_page["total_snippets"] == 130
+    assert len(first_page["snippets"]) == 30
+    assert first_page["has_more"] is True
+
+    final_page = planner.format_spec_detail(
+        "四川省-dbj51-168-2021",
+        "四川省住宅规范",
+        offset=120,
+        limit=30,
+    )
+    assert final_page is not None
+    assert len(final_page["snippets"]) == 10
+    assert final_page["has_more"] is False
 
 
 def test_residential_spacing_query_requires_spacing_context() -> None:

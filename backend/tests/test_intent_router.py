@@ -57,6 +57,24 @@ def test_known_synonym_term_is_not_rejected_as_fallback() -> None:
     assert result.source == "rules"
 
 
+def test_short_component_and_attribute_terms_are_not_rejected() -> None:
+    router = IntentRouter()
+
+    for query in ("踏步", "扶手", "平台", "净高", "住宅"):
+        result = router.classify(query, use_llm=False)
+        assert result.intent == INTENT_TERM, query
+        assert result.source == "rules"
+
+
+def test_canonical_concept_terms_are_not_rejected() -> None:
+    router = IntentRouter()
+
+    for query in ("防火分区", "疏散楼梯", "卫生间"):
+        result = router.classify(query, use_llm=False)
+        assert result.intent == INTENT_TERM, query
+        assert result.source == "rules"
+
+
 def test_explicit_out_of_scope_question_skips_llm_classification() -> None:
     class FakeLLM:
         enabled = True
@@ -94,7 +112,7 @@ def test_llm_second_layer_overrides_low_confidence_rules() -> None:
             return {"content": '{"intent": "numeric", "confidence": 0.9, "reason": "指标查询"}', "tool_calls": []}
 
     router = IntentRouter(FakeLLM())
-    result = router.classify("楼梯踏板", use_llm=True)
+    result = router.classify("幕墙节点", use_llm=True)
     assert result.intent == INTENT_NUMERIC
     assert result.source == "llm"
 

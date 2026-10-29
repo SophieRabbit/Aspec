@@ -25,6 +25,8 @@ from ..agent.intent_router import (
     INTENT_NUMBER,
     INTENT_NUMERIC,
     INTENT_SCENARIO,
+    INTENT_TERM,
+    IntentResult,
     IntentRouter,
 )
 from ..agent.planner import Planner
@@ -75,6 +77,11 @@ INTENT_ALIASES = {
 OUT_OF_SCOPE_REPLY = (
     "抱歉，这个问题与工程建设规范无关，我无法回答。"
     "请提出工程建设规范相关问题。"
+)
+
+NOT_FOUND_REPLY = (
+    "当前规范知识库没有检索到与你所问主题直接相关的条文。"
+    "请补充规范名称、专业术语或具体项目场景后再试。"
 )
 
 OUTSIDE_MAINLAND_LABEL = "中国大陆以外"
@@ -522,12 +529,16 @@ def spec_detail(
     q: str = "",
     article: str = "",
     page: int | None = None,
+    offset: int = 0,
+    limit: int = 30,
 ) -> schemas.SpecDetailResponse:
     result = planner.format_spec_detail(
         doc_id,
         q,
         article=article,
         page=page,
+        offset=max(0, offset),
+        limit=max(1, min(100, limit)),
     )
     if result is None:
         raise HTTPException(status_code=404, detail="规范详情不存在")
@@ -961,15 +972,52 @@ def handle_query(
                 intent_result,
             )
         if alias == "fallback":
-            return _attach_intent(
-                _intent_result(
-                    OUT_OF_SCOPE_REPLY,
-                    "拒绝无关问题",
-                    "问题与工程建设规范无关，不触发规范检索或内容生成",
-                    user_input,
-                ),
-                intent_result,
+            if intent_result.matched_patterns:
+                return _attach_intent(
+                    _intent_result(
+                        OUT_OF_SCOPE_REPLY,
+                        "拒绝无关问题",
+                        "问题与工程建设规范无关，不触发规范检索或内容生成",
+                        user_input,
+                    ),
+                    intent_result,
+                )
+            expanded = planner.expand_unknown_query(user_input)
+            if expanded is not None:
+                semantic_query = " ".join((user_input, *expanded.terms))
+                semantic_result = planner.run(
+                    semantic_query,
+                    previous_query=previous_query,
+                    memory_facts=memory_facts,
+                    enable_web_search=enable_web_search,
+                    force_retrieve=True,
+                )
+                if semantic_result.get("sources"):
+                    semantic_intent = IntentResult(
+                        intent=INTENT_TERM,
+                        confidence=0.85,
+                        matched_patterns=(),
+                        source="llm",
+                        query=user_input,
+                    )
+                    semantic_result["query_expansion"] = expanded.to_dict()
+                    return _attach_intent(semantic_result, semantic_intent)
+            not_found = _intent_result(
+                NOT_FOUND_REPLY,
+                "未找到相关条文",
+                "语义扩展后本地规范库仍无直接匹配",
+                user_input,
             )
+            not_found.update(
+                {
+                    "intent": INTENT_FALLBACK,
+                    "intent_label": "未找到相关条文",
+                    "intent_source": "llm" if expanded is not None else "rules",
+                    "intent_confidence": 0.85 if expanded is not None else 0.55,
+                    "intent_alias": "fallback",
+                }
+            )
+            return not_found
     except Exception:
         # 占位实现异常时回退到原有 Planner 流程。
         pass

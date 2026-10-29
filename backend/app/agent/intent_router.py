@@ -6,7 +6,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from services.synonym_expander import expand_query_details
+from services.building_component_matcher import detect_building_component
+from services.building_type_matcher import detect_building_types
+from services.synonym_expander import expand_query_details, match_canonical_terms
 
 from .llm import FunctionCallingClient
 
@@ -154,6 +156,23 @@ _CHITCHAT_ONLY = re.compile(
 _EXPLICIT_OUT_OF_SCOPE = re.compile(
     r"(?:生肖|属相|星座|占星|星座运势|塔罗|算命|八字|求签|解梦)",
     re.IGNORECASE,
+)
+
+_KNOWN_QUERY_ATTRIBUTES = (
+    "尺寸",
+    "宽度",
+    "高度",
+    "厚度",
+    "坡度",
+    "间距",
+    "距离",
+    "净高",
+    "层高",
+    "面积",
+    "数量",
+    "比例",
+    "限值",
+    "荷载",
 )
 
 _RULE_PATTERNS: list[tuple[str, list[str], float]] = [
@@ -317,7 +336,14 @@ class IntentRouter:
         rule_result = self._classify_by_rules(normalized)
         if rule_result.confidence >= self.low_confidence_threshold:
             return rule_result
-        if rule_result.intent == INTENT_FALLBACK and expand_query_details(normalized).matches:
+        known_local_term = bool(
+            expand_query_details(normalized).matches
+            or match_canonical_terms(normalized)
+            or detect_building_component(normalized)
+            or detect_building_types(normalized)
+            or any(attribute in normalized for attribute in _KNOWN_QUERY_ATTRIBUTES)
+        )
+        if rule_result.intent == INTENT_FALLBACK and known_local_term:
             return IntentResult(
                 intent=INTENT_TERM,
                 confidence=0.82,

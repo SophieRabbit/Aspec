@@ -5,7 +5,7 @@ from app.knowledge.keywords import extract_keywords
 from app.knowledge.loader import KnowledgeBase
 from app.knowledge.retriever import Retriever
 from services.compound_intent import detect_compound_intent
-from services.synonym_expander import expand_query
+from services.synonym_expander import expand_query, match_canonical_terms
 
 
 def test_roof_garden_aliases_are_expanded() -> None:
@@ -137,3 +137,7 @@ def test_concept_detail_returns_only_highlighted_concept_text() -> None:
         "<mark>空中花园</mark>" in item["text"]
         for item in result["snippets"]
     )
+
+
+def test_canonical_name_is_matchable_without_synonym_alias() -> None:
+    assert match_canonical_terms("防火分区") == ("防火分区",)

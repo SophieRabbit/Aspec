@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import time
+from difflib import SequenceMatcher
 from typing import Any
 
 from ..config import (
@@ -176,6 +177,7 @@ class Planner:
         memory_facts: list[dict[str, Any]] | None = None,
         enable_web_search: bool = False,
         enable_function_calling: bool = AGENT_FUNCTION_CALLING_ENABLED,
+        force_retrieve: bool = False,
     ) -> dict[str, Any]:
         outside_place = detect_outside_mainland_place(query)
         if outside_place:
@@ -202,8 +204,14 @@ class Planner:
             previous_query=previous_query,
             memory_facts=memory_facts,
             enable_web_search=enable_web_search,
+            force_retrieve=force_retrieve,
         )
         return self._with_local_dependency_notice(result, query)
+
+    def expand_unknown_query(self, query: str) -> Any | None:
+        if self.query_expander is None:
+            return None
+        return self.query_expander.expand(query)
 
     def _with_local_dependency_notice(
         self,
@@ -281,6 +289,7 @@ class Planner:
         previous_query: str | None = None,
         memory_facts: list[dict[str, Any]] | None = None,
         enable_web_search: bool = False,
+        force_retrieve: bool = False,
     ) -> dict[str, Any]:
         steps: list[dict[str, Any]] = []
         sources: list[dict[str, Any]] = []
@@ -367,7 +376,12 @@ class Planner:
                 "memory_used": uses_memory,
             }
 
-        for tool, title, detail in self.plan(comparison_query):
+        planned_tools = (
+            [("retrieve", "条文检索", "语义扩展后从本地规范库检索相关条文")]
+            if force_retrieve
+            else self.plan(comparison_query)
+        )
+        for tool, title, detail in planned_tools:
             started = time.perf_counter()
             if tool == "retrieve":
                 sources = retrieve_tool(
@@ -1515,9 +1529,33 @@ class Planner:
                     "level": label,
                     "priority": source.get("priority", 0),
                     "tier": source.get("tier", ""),
+                    "full_text_match": self._is_near_standard_title(
+                        query,
+                        source.get("title", ""),
+                    ),
                 }
             )
         return {"query": query, "items": items[:10]}
+
+    @staticmethod
+    def _is_near_standard_title(query: str, title: str) -> bool:
+        def title_key(value: str) -> str:
+            text = re.sub(r"[\s，。；,.;:：（）()《》]+", "", value)
+            for token in ("设计规范", "设计标准", "规范", "标准", "规程", "规定", "设计"):
+                text = text.replace(token, "")
+            return text
+
+        compact_query = re.sub(r"[\s，。；,.;:：（）()《》]+", "", query)
+        if len(compact_query) < 6:
+            return False
+        return (
+            SequenceMatcher(
+                None,
+                title_key(query),
+                title_key(title),
+            ).ratio()
+            >= 0.8
+        )
 
     @staticmethod
     def _split_snippet_clause_fragments(
@@ -1626,6 +1664,8 @@ class Planner:
         query: str = "",
         article: str = "",
         page: int | None = None,
+        offset: int = 0,
+        limit: int | None = None,
     ) -> dict[str, Any] | None:
         document = next(
             (
@@ -1642,8 +1682,16 @@ class Planner:
             snippets: list[dict[str, Any]],
             *,
             matched: bool,
+            full_text: bool = False,
         ) -> dict[str, Any]:
             standard = document.get("standard", "")
+            total_snippets = len(snippets)
+            safe_offset = max(0, offset)
+            page_snippets = (
+                snippets[safe_offset : safe_offset + max(1, limit)]
+                if limit is not None
+                else snippets[safe_offset:]
+            )
             return {
                 "doc_id": doc_id,
                 "standard": standard,
@@ -1660,7 +1708,10 @@ class Planner:
                 "priority": document.get("priority", 0),
                 "tier": document.get("tier", ""),
                 "matched": matched,
-                "snippets": snippets,
+                "full_text": full_text,
+                "total_snippets": total_snippets,
+                "has_more": safe_offset + len(page_snippets) < total_snippets,
+                "snippets": page_snippets,
             }
 
         terms = self._highlight_terms(query)
@@ -1703,6 +1754,36 @@ class Planner:
                     ],
                     matched=True,
                 )
+
+        if self._is_near_standard_title(query, document.get("title", "")):
+            full_snippets = []
+            for snippet in document.get("snippets", []):
+                text = self._normalize_ocr_layout(
+                    str(snippet.get("text", "")).rstrip()
+                )
+                if not text:
+                    continue
+                full_snippets.append(
+                    {
+                        "chapter": snippet.get("chapter", ""),
+                        "article": snippet.get("article", ""),
+                        "page": snippet.get("page"),
+                        "book_page": snippet.get("book_page"),
+                        "text": self._highlight_html(text, []),
+                        "score": 0,
+                    }
+                )
+            full_snippets.sort(
+                key=lambda item: (
+                    int(item.get("page") or 0),
+                    int(item.get("book_page") or 0),
+                )
+            )
+            return build_detail(
+                full_snippets,
+                matched=True,
+                full_text=True,
+            )
 
         if query.strip():
             ranked_sources = [
@@ -1801,26 +1882,10 @@ class Planner:
                     int(item.get("page") or 0),
                 )
             )
-            return {
-                "doc_id": doc_id,
-                "standard": document.get("standard", ""),
-                "title": document.get("title", ""),
-                "document_type": document.get("document_type", "规范"),
-                "region": document.get("region", "全国"),
-                "status": self._source_status(
-                    {
-                        "standard": document.get("standard", ""),
-                        "doc_id": doc_id,
-                    }
-                ),
-                "effective_date": self._standard_effective_date(
-                    document.get("standard", "")
-                ),
-                "priority": document.get("priority", 0),
-                "tier": document.get("tier", ""),
-                "matched": bool(concept_snippets),
-                "snippets": concept_snippets[:30],
-            }
+            return build_detail(
+                concept_snippets[:30],
+                matched=bool(concept_snippets),
+            )
         def representative_snippets() -> list[dict[str, Any]]:
             snippets: list[dict[str, Any]] = []
             noise = (

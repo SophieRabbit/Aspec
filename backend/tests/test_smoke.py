@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.api import routes as api_routes
 from app.main import app
 from app.schemas import ChatRequest
+from services.query_expansion import ExpandedQuery
 
 
 client = TestClient(app)
@@ -71,6 +72,53 @@ def test_uncovered_question_does_not_offer_human_support() -> None:
     assert payload["sources"] == []
     assert "人工" not in payload["reply"]
     assert "工程建设规范" in payload["reply"]
+
+
+def test_unknown_engineering_term_uses_semantic_expansion(monkeypatch) -> None:
+    monkeypatch.setattr(
+        api_routes.planner.query_expander,
+        "expand",
+        lambda query: ExpandedQuery(
+            canonical_topic="消防车登高操作场地",
+            synonyms=("消防登高场地",),
+            search_queries=("消防车登高操作场地 长度 宽度",),
+            attributes=("尺寸", "距离"),
+        ),
+    )
+
+    response = client.post(
+        "/api/chat",
+        json={"message": "登高救援硬化铺面"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "term"
+    assert payload["intent_source"] == "llm"
+    assert {source["standard"] for source in payload["sources"]} == {
+        "GB50016-2014",
+        "GB55037-2022",
+    }
+    assert "15m" in payload["reply"]
+
+
+def test_unknown_engineering_term_without_retrieval_is_not_called_out_of_scope(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        api_routes.planner.query_expander,
+        "expand",
+        lambda query: None,
+    )
+
+    response = client.post(
+        "/api/chat",
+        json={"message": "完全未知的专业构造名词"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent_label"] == "未找到相关条文"
+    assert payload["sources"] == []
+    assert payload["reply"] == api_routes.NOT_FOUND_REPLY
 
 
 def test_zodiac_question_is_directly_refused_without_zodiac_content() -> None:

@@ -281,6 +281,7 @@ class SearchItem(BaseModel):
     level: str = ""
     priority: int = 0
     tier: str = ""
+    full_text_match: bool = False
 
 
 class SearchResponse(BaseModel):
@@ -307,6 +308,9 @@ class SpecDetailResponse(BaseModel):
     priority: int = 0
     tier: str = ""
     matched: bool = True
+    full_text: bool = False
+    total_snippets: int = 0
+    has_more: bool = False
     snippets: list[SpecSnippet] = []
 
 
